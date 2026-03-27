@@ -112,7 +112,7 @@ const loadProjects = async () => {
   loading.value = true
   try {
     const token = userStore.token
-    const response = await fetch('http://192.168.200.77:8080/api/projects', {
+    const response = await fetch('http://192.168.200.77:4000/api/projects', {
       method: 'GET',
       headers: {
         'Authorization': `Bearer ${token}`

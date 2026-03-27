@@ -1400,7 +1400,7 @@ const loadAnnotationsToMap = (annotations) => {
 const handleCreateProject = async (projectData) => {
   try {
     const token = userStore.token
-    const response = await fetch('http://192.168.200.77:8080/api/projects', {
+    const response = await fetch('http://192.168.200.77:4000/api/projects', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -1430,7 +1430,7 @@ const handleCreateProject = async (projectData) => {
 const handleOpenProject = async (project) => {
   try {
     const token = userStore.token
-    const response = await fetch(`http://192.168.200.77:8080/api/projects/${project.id}`, {
+    const response = await fetch(`http://192.168.200.77:4000/api/projects/${project.id}`, {
       method: 'GET',
       headers: {
         'Authorization': `Bearer ${token}`
@@ -1481,7 +1481,7 @@ const saveCurrentAnnotations = async () => {
     const annotations = getCurrentAnnotations()
     const token = userStore.token
 
-    const response = await fetch(`http://192.168.200.77:8080/api/projects/${currentProject.value.id}/annotations`, {
+    const response = await fetch(`http://192.168.200.77:4000/api/projects/${currentProject.value.id}/annotations`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -1511,7 +1511,7 @@ const exportShapefile = () => {
   }
 
   const token = userStore.token
-  const url = `http://192.168.200.77:8080/api/projects/${currentProject.value.id}/export/shapefile`
+  const url = `http://192.168.200.77:4000/api/projects/${currentProject.value.id}/export/shapefile`
 
   // 创建下载链接
   const link = document.createElement('a')
@@ -1557,7 +1557,7 @@ const exportGeoJSON = async () => {
 
   try {
     const token = userStore.token
-    const response = await fetch(`http://192.168.200.77:8080/api/projects/${currentProject.value.id}/export/geojson`, {
+    const response = await fetch(`http://192.168.200.77:4000/api/projects/${currentProject.value.id}/export/geojson`, {
       method: 'GET',
       headers: {
         'Authorization': `Bearer ${token}`

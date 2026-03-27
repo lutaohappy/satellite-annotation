@@ -29,7 +29,7 @@ spring:
 
 # 服务器配置
 server:
-  port: 8080
+  port: 4000
 
 # JWT 配置
 jwt:
@@ -73,5 +73,5 @@ image:
   tile-dir: /opt/uploads/tiles/
 
 server:
-  port: 8080
+  port: 4000
   address: 0.0.0.0
