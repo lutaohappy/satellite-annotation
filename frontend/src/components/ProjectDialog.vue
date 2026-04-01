@@ -63,7 +63,7 @@
 
 <script setup>
 import { ref, computed, watch, onMounted } from 'vue'
-const BUILD_VERSION = '20260401-1630'
+const BUILD_VERSION = '20260401-1930'
 console.log('[ProjectDialog] 当前版本:', BUILD_VERSION)
 import { ElMessage } from 'element-plus'
 import { useUserStore } from '@/stores/user'

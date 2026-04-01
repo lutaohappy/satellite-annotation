@@ -28,6 +28,7 @@
       <el-button-group>
         <el-tooltip content="选择要素"><el-button :type="editMode==='select'?'warning':''" @click="setEditMode('select')">选择</el-button></el-tooltip>
         <el-tooltip content="删除要素"><el-button :type="editMode==='delete'?'danger':''" @click="setEditMode('delete')">删除</el-button></el-tooltip>
+        <el-tooltip content="空闲状态"><el-button :type="!editMode && !drawType ?'success':''" @click="clearToIdle">空闲</el-button></el-tooltip>
       </el-button-group>
 
       <el-divider direction="vertical" />
@@ -102,6 +103,23 @@
       @open="handleOpenProject"
       @close="projectDialogVisible = false"
     />
+
+    <!-- 右键菜单 -->
+    <div
+      v-if="contextMenuVisible"
+      class="context-menu"
+      :style="{ left: contextMenuPosition.x + 'px', top: contextMenuPosition.y + 'px' }"
+      @click.stop
+    >
+      <div class="context-menu-item" @click="copyFeature">
+        <el-icon><Connection /></el-icon>
+        <span>复制</span>
+      </div>
+      <div class="context-menu-item" @click="pasteFeature" :class="{ disabled: !copiedFeature }">
+        <el-icon><DocumentCopy /></el-icon>
+        <span>粘贴</span>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -109,7 +127,8 @@
 import { ref, onMounted, onUnmounted, onBeforeUnmount } from 'vue'
 import { useRouter } from 'vue-router'
 import { useUserStore } from '@/stores/user'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
+import { Connection, DocumentCopy } from '@element-plus/icons-vue'
 import MapTools from '@/components/MapTools.vue'
 import SymbolEditDialog from '@/components/SymbolEditDialog.vue'
 import ProjectDialog from '@/components/ProjectDialog.vue'
@@ -128,7 +147,7 @@ import { Circle as CircleGeom, Polygon, Point, LineString } from 'ol/geom'
 import { fromExtent } from 'ol/geom/Polygon'
 
 // 版本号（用于调试）
-const BUILD_VERSION = '20260401-1630'
+const BUILD_VERSION = '20260401-1930'
 console.log('%c [Map] 当前版本:', 'background: #f00; color: #fff; font-size: 16px;', BUILD_VERSION)
 console.log('%c [Map] 如果看到这个日志，说明加载的是新代码！', 'background: #0f0; color: #000; font-size: 14px;')
 
@@ -171,6 +190,12 @@ const predefineColors = ref([
   '#409eff', '#67c23a', '#e6a23c', '#f56c6c', '#909399',
   '#ff0000', '#00ff00', '#0000ff', '#ffff00', '#00ffff', '#ff00ff'
 ])
+
+// 复制/粘贴相关
+const copiedFeature = ref(null) // 复制的要素
+const contextMenuVisible = ref(false)
+const contextMenuPosition = ref({ x: 0, y: 0 })
+const contextMenuFeature = ref(null) // 右键点击的要素
 
 // 符号数据 - 从 localStorage 读取已保存的符号
 const defaultSymbols = [
@@ -322,6 +347,43 @@ const initMap = () => {
   })
 
   map.addInteraction(select)
+
+  // 监听右键点击事件，显示上下文菜单
+  map.on('contextmenu', (e) => {
+    e.preventDefault()
+
+    // 隐藏菜单
+    contextMenuVisible.value = false
+
+    // 获取点击位置的要素
+    const clickedFeature = map.forEachFeatureAtPixel(e.pixel, (feature) => {
+      return feature
+    })
+
+    // 设置菜单位置
+    contextMenuPosition.value = {
+      x: e.originalEvent.clientX,
+      y: e.originalEvent.clientY
+    }
+
+    // 如果已复制要素，任意位置右键都显示菜单（包含粘贴选项）
+    if (copiedFeature.value) {
+      // 如果点击到要素，也设置成可复制的要素
+      if (clickedFeature) {
+        contextMenuFeature.value = clickedFeature
+      }
+      contextMenuVisible.value = true
+    } else if (clickedFeature) {
+      // 没有复制要素时，只有点击到要素才显示菜单（只有复制选项）
+      contextMenuFeature.value = clickedFeature
+      contextMenuVisible.value = true
+    }
+  })
+
+  // 点击地图时关闭上下文菜单
+  map.on('click', () => {
+    contextMenuVisible.value = false
+  })
 
   // 监听点击事件，实现删除功能
   map.on('click', (e) => {
@@ -819,6 +881,28 @@ const clearDraw = () => {
   statusMessage.value = '已取消标注工具'
 }
 
+// 切换到空闲状态（取消所有编辑和绘制状态）
+const clearToIdle = () => {
+  // 清除绘制状态
+  clearDraw()
+  // 清除编辑模式
+  editMode.value = null
+  // 清除量测模式
+  isMeasureMode.value = false
+  measureCallback.value = null
+  // 清除选择
+  if (select) {
+    select.getFeatures().clear()
+  }
+  selectedFeature.value = null
+  // 清除符号选择
+  selectedSymbol.value = null
+  if (mapRef.value) {
+    mapRef.value.style.cursor = 'default'
+  }
+  statusMessage.value = '已切换到空闲状态'
+}
+
 // 检查点是否在多边形内部（用于判断是否拖动图形内部）
 const isPointInPolygon = (point, coords) => {
   const x = point[0], y = point[1]
@@ -1100,6 +1184,119 @@ const zoomToExtent = () => {
 const clearAll = () => {
   vectorSource.clear()
   statusMessage.value = '已清除所有标注'
+}
+
+// 复制要素
+const copyFeature = () => {
+  if (contextMenuFeature.value) {
+    const original = contextMenuFeature.value
+
+    // 保存原始样式引用（如果要素有 originalStyle）
+    const originalStyle = original.get('originalStyle')
+
+    // 克隆要素数据
+    copiedFeature.value = {
+      geomType: original.get('geomType'),
+      isSymbol: original.get('isSymbol'),
+      symbolId: original.get('symbolId'),
+      symbolName: original.get('symbolName'),
+      symbolStyle: original.get('symbolStyle'),
+      geometry: original.getGeometry().clone()
+    }
+
+    ElMessage.success('已复制要素，右键点击地图任意位置粘贴')
+    contextMenuVisible.value = false
+
+    // 清除选择状态，让要素不再处于激活状态
+    if (select) {
+      // 先恢复要素样式
+      if (originalStyle) {
+        original.setStyle(originalStyle)
+      } else {
+        original.setStyle(getDefaultStyle())
+      }
+      original.set('originalStyle', null)
+      // 清除选择
+      select.getFeatures().clear()
+    }
+    selectedFeature.value = null
+
+    // 触发图层重绘
+    if (vectorLayer) {
+      vectorLayer.changed()
+    }
+  }
+}
+
+// 粘贴要素（在菜单位置）
+const pasteFeature = () => {
+  if (!copiedFeature.value) {
+    ElMessage.warning('没有复制的要素')
+    return
+  }
+
+  try {
+    const { geomType, isSymbol, symbolId, symbolName, symbolStyle, geometry } = copiedFeature.value
+
+    // 克隆几何体
+    const newGeometry = geometry.clone()
+    const coords = newGeometry.getCoordinates()
+
+    // 获取右键菜单打开时的位置坐标
+    const clickCoord = map.getCoordinateFromPixel([contextMenuPosition.value.x, contextMenuPosition.value.y])
+
+    // 计算原始几何的中心点
+    let centerCoord
+    if (geometry.getType() === 'Point') {
+      centerCoord = coords
+    } else {
+      // 计算边界框中心
+      const extent = geometry.getExtent()
+      centerCoord = [(extent[0] + extent[2]) / 2, (extent[1] + extent[3]) / 2]
+    }
+
+    // 计算偏移量
+    const offsetX = clickCoord[0] - centerCoord[0]
+    const offsetY = clickCoord[1] - centerCoord[1]
+
+    // 应用偏移
+    let newCoords
+    if (Array.isArray(coords[0])) {
+      // Polygon 或 LineString - 偏移每个点
+      newCoords = coords.map(ring => Array.isArray(ring)
+        ? ring.map(c => [c[0] + offsetX, c[1] + offsetY])
+        : [ring[0] + offsetX, ring[1] + offsetY]
+      )
+    } else {
+      // Point - 直接使用点击位置
+      newCoords = clickCoord
+    }
+    newGeometry.setCoordinates(newCoords)
+
+    // 创建新要素
+    const newFeature = new Feature({
+      geomType,
+      isSymbol,
+      symbolId,
+      symbolName
+    })
+    newFeature.setGeometry(newGeometry)
+
+    // 设置样式
+    if (symbolStyle) {
+      newFeature.setStyle(symbolStyle.clone())
+      newFeature.set('symbolStyle', symbolStyle.clone())
+    }
+
+    // 添加到地图
+    vectorSource.addFeature(newFeature)
+
+    ElMessage.success('已粘贴要素')
+    contextMenuVisible.value = false
+  } catch (error) {
+    console.error('粘贴失败:', error)
+    ElMessage.error('粘贴失败：' + error.message)
+  }
 }
 
 // 处理量测结果
@@ -1714,5 +1911,41 @@ onUnmounted(() => {
 .el-button svg {
   display: inline-block;
   vertical-align: middle;
+}
+
+/* 右键菜单样式 */
+.context-menu {
+  position: fixed;
+  z-index: 9999;
+  background: white;
+  border-radius: 6px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+  padding: 6px 0;
+  min-width: 120px;
+}
+
+.context-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px;
+  cursor: pointer;
+  transition: all 0.2s;
+  font-size: 14px;
+  color: #333;
+}
+
+.context-menu-item:hover {
+  background: #f5f7fa;
+  color: #409eff;
+}
+
+.context-menu-item.disabled {
+  color: #ccc;
+  cursor: not-allowed;
+}
+
+.context-menu-item.disabled:hover {
+  background: transparent;
 }
 </style>
