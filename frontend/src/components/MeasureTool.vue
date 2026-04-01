@@ -183,7 +183,7 @@ defineExpose({
 <style scoped>
 .measure-tool {
   position: absolute;
-  top: 60px;
+  bottom: 30px;
   left: 10px;
   z-index: 1000;
 }

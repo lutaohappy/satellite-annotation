@@ -25,16 +25,6 @@
 
       <el-divider direction="vertical" />
 
-      <!-- 符号标注 - 平铺展示 -->
-      <el-tooltip content="雷达站"><el-button :type="selectedSymbol?.id===1 && drawType==='Point'?'primary':''" @click="selectSymbolAndDraw(symbols[0])" class="symbol-btn"><svg viewBox="0 0 100 100" v-html="symbols[0].content"></svg></el-button></el-tooltip>
-      <el-tooltip content="机场"><el-button :type="selectedSymbol?.id===2 && drawType==='Point'?'primary':''" @click="selectSymbolAndDraw(symbols[1])" class="symbol-btn"><svg viewBox="0 0 100 100" v-html="symbols[1].content"></svg></el-button></el-tooltip>
-      <el-tooltip content="医院"><el-button :type="selectedSymbol?.id===3 && drawType==='Point'?'primary':''" @click="selectSymbolAndDraw(symbols[2])" class="symbol-btn"><svg viewBox="0 0 100 100" v-html="symbols[2].content"></svg></el-button></el-tooltip>
-      <el-tooltip content="森林"><el-button :type="selectedSymbol?.id===4 && drawType==='Point'?'primary':''" @click="selectSymbolAndDraw(symbols[3])" class="symbol-btn"><svg viewBox="0 0 100 100" v-html="symbols[3].content"></svg></el-button></el-tooltip>
-      <el-tooltip content="学校"><el-button :type="selectedSymbol?.id===5 && drawType==='Point'?'primary':''" @click="selectSymbolAndDraw(symbols[4])" class="symbol-btn"><svg viewBox="0 0 100 100" v-html="symbols[4].content"></svg></el-button></el-tooltip>
-      <el-tooltip content="加油站"><el-button :type="selectedSymbol?.id===6 && drawType==='Point'?'primary':''" @click="selectSymbolAndDraw(symbols[5])" class="symbol-btn"><svg viewBox="0 0 100 100" v-html="symbols[5].content"></svg></el-button></el-tooltip>
-
-      <el-divider direction="vertical" />
-
       <el-button-group>
         <el-tooltip content="选择要素"><el-button :type="editMode==='select'?'warning':''" @click="setEditMode('select')">选择</el-button></el-tooltip>
         <el-tooltip content="删除要素"><el-button :type="editMode==='delete'?'danger':''" @click="setEditMode('delete')">删除</el-button></el-tooltip>
@@ -72,16 +62,20 @@
       </div>
     </div>
 
-    <!-- 量测工具组件 -->
-    <MeasureTool
+    <!-- 地图容器 -->
+    <div ref="mapRef" class="map"></div>
+
+    <!-- 工具面板组件（量测 + 符号库） -->
+    <MapTools
       v-if="mapInitialized"
       :map="map"
       :vector-source="vectorSource"
+      :symbols="symbols"
+      :selected-symbol="selectedSymbol"
       @measure-result="handleMeasureResult"
+      @symbol-select="handleToolSymbolSelect"
+      @symbols-change="handleSymbolsChange"
     />
-
-    <!-- 地图容器 -->
-    <div ref="mapRef" class="map"></div>
 
     <!-- 状态栏 -->
     <div class="status-bar">
@@ -97,16 +91,6 @@
       v-model="symbolEditDialogVisible"
       :initial-symbols="symbols"
       @symbols-change="handleSymbolsChange"
-    />
-
-    <!-- 浮动符号面板 -->
-    <SymbolPalette
-      v-model="symbolPaletteVisible"
-      :symbols="symbols"
-      :selected-symbol="selectedSymbol"
-      @symbol-select="handlePaletteSymbolSelect"
-      @symbols-change="handleSymbolsChange"
-      @open-library="openSymbolLibrary"
     />
 
     <!-- 项目管理对话框 -->
@@ -126,9 +110,8 @@ import { ref, onMounted, onUnmounted, onBeforeUnmount } from 'vue'
 import { useRouter } from 'vue-router'
 import { useUserStore } from '@/stores/user'
 import { ElMessage } from 'element-plus'
-import MeasureTool from '@/components/MeasureTool.vue'
+import MapTools from '@/components/MapTools.vue'
 import SymbolEditDialog from '@/components/SymbolEditDialog.vue'
-import SymbolPalette from '@/components/SymbolPalette.vue'
 import ProjectDialog from '@/components/ProjectDialog.vue'
 import Map from 'ol/Map'
 import View from 'ol/View'
@@ -145,7 +128,7 @@ import { Circle as CircleGeom, Polygon, Point, LineString } from 'ol/geom'
 import { fromExtent } from 'ol/geom/Polygon'
 
 // 版本号（用于调试）
-const BUILD_VERSION = '20260325-NEW-FIX-v3'
+const BUILD_VERSION = '20260401-1630'
 console.log('%c [Map] 当前版本:', 'background: #f00; color: #fff; font-size: 16px;', BUILD_VERSION)
 console.log('%c [Map] 如果看到这个日志，说明加载的是新代码！', 'background: #0f0; color: #000; font-size: 14px;')
 
@@ -172,7 +155,6 @@ const measureCallback = ref(null)
 // 符号相关
 const selectedSymbol = ref(null)
 const symbolEditDialogVisible = ref(false)
-const symbolPaletteVisible = ref(true) // 默认显示浮动符号面板
 
 // 项目管理相关
 const projectDialogVisible = ref(false)
@@ -1277,8 +1259,8 @@ const handleSymbolsChange = (newSymbols) => {
   saveSymbolsToStorage(newSymbols)
 }
 
-// 处理浮动符号面板的符号选择
-const handlePaletteSymbolSelect = (symbol) => {
+// 处理工具面板的符号选择
+const handleToolSymbolSelect = (symbol) => {
   if (symbol) {
     selectSymbolAndDraw(symbol)
   }
@@ -1312,6 +1294,7 @@ const getCurrentAnnotations = () => {
     const geometry = feature.getGeometry()
     if (!geometry) return
 
+    // 数据已经是 EPSG:3857，直接获取坐标
     const coordinates = geometry.getCoordinates()
 
     // 构建 GeoJSON 要素
@@ -1343,11 +1326,26 @@ const getCurrentAnnotations = () => {
 
 // 加载标注到地图
 const loadAnnotationsToMap = (annotations) => {
+  console.log('[LoadAnnotations] Loading annotations:', annotations)
+  console.log('[LoadAnnotations] annotations length:', annotations.length)
+
   // 清空当前地图
   vectorSource.clear()
 
-  annotations.forEach(annData => {
-    const { geometry, properties } = annData
+  annotations.forEach((annData, index) => {
+    let { geometry, properties } = annData
+
+    // 解析 JSON 字符串（后端返回的是字符串）
+    if (typeof geometry === 'string') {
+      geometry = JSON.parse(geometry)
+    }
+    if (typeof properties === 'string') {
+      properties = JSON.parse(properties)
+    }
+
+    console.log(`[LoadAnnotations] Processing annotation ${index}:`, annData)
+    console.log(`[LoadAnnotations] geometry.type:`, geometry.type)
+    console.log(`[LoadAnnotations] geometry.coordinates:`, geometry.coordinates)
 
     // 创建要素
     const feature = new Feature({
@@ -1356,26 +1354,33 @@ const loadAnnotationsToMap = (annotations) => {
       symbolId: properties.symbolId,
       symbolName: properties.symbolName
     })
+    console.log('[LoadAnnotations] Created feature:', feature)
 
-    // 创建几何
+    // 创建几何 - 数据已经是 EPSG:3857，不需要转换
     let geom
     if (geometry.type === 'Point') {
+      console.log('[LoadAnnotations] Point coords:', geometry.coordinates)
       geom = new Point(geometry.coordinates)
     } else if (geometry.type === 'LineString') {
+      console.log('[LoadAnnotations] LineString coords:', geometry.coordinates)
       geom = new LineString(geometry.coordinates)
     } else if (geometry.type === 'Polygon') {
+      console.log('[LoadAnnotations] Polygon coords:', geometry.coordinates)
       geom = new Polygon(geometry.coordinates)
     } else if (geometry.type === 'Circle') {
       // Circle 用 Polygon 近似
+      console.log('[LoadAnnotations] Circle coords:', geometry.coordinates)
       geom = new Polygon(geometry.coordinates)
     } else if (geometry.type === 'Rectangle') {
       // Rectangle 用 Polygon 近似
+      console.log('[LoadAnnotations] Rectangle coords:', geometry.coordinates)
       geom = new Polygon(geometry.coordinates)
     }
 
+    console.log('[LoadAnnotations] Created geom:', geom)
     feature.setGeometry(geom)
 
-    // 设置样式
+    // 设置样式 - 如果不是符号，使用默认样式
     if (properties.isSymbol && properties.symbolId) {
       // 尝试通过 symbolId 查找符号（可能是数字 ID 或字符串 ID）
       let symbol = symbols.value.find(s => s.id === properties.symbolId)
@@ -1387,20 +1392,30 @@ const loadAnnotationsToMap = (annotations) => {
         const symbolStyle = createSymbolStyle(symbol)
         feature.setStyle(symbolStyle)
         feature.set('symbolStyle', symbolStyle)
+        console.log('[LoadAnnotations] Set symbol style for feature')
+      } else {
+        console.log('[LoadAnnotations] Symbol not found, using default style')
+        feature.setStyle(getDefaultStyle())
       }
+    } else {
+      console.log('[LoadAnnotations] Not a symbol, using default style')
+      feature.setStyle(getDefaultStyle())
     }
 
+    console.log('[LoadAnnotations] Feature style:', feature.getStyle())
     vectorSource.addFeature(feature)
+    console.log('[LoadAnnotations] Added feature to vectorSource')
   })
 
+  console.log('[LoadAnnotations] Final vectorSource features count:', vectorSource.getFeatures().length)
   statusMessage.value = `已加载 ${annotations.length} 个标注`
 }
 
 // 创建项目
 const handleCreateProject = async (projectData) => {
   try {
-    const token = userStore.token
-    const response = await fetch('http://192.168.200.77:4000/api/projects', {
+    const token = localStorage.getItem('token')
+    const response = await fetch('/api/projects', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -1429,22 +1444,31 @@ const handleCreateProject = async (projectData) => {
 // 打开项目
 const handleOpenProject = async (project) => {
   try {
-    const token = userStore.token
-    const response = await fetch(`http://192.168.200.77:4000/api/projects/${project.id}`, {
+    const token = localStorage.getItem('token')
+    console.log('[Open Project] token:', token ? token.substring(0, 20) + '...' : 'null')
+    console.log('[Open Project] project id:', project.id)
+    const response = await fetch(`/api/projects/${project.id}`, {
       method: 'GET',
       headers: {
-        'Authorization': `Bearer ${token}`
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json'
       }
     })
 
+    console.log('[Open Project] response status:', response.status)
+
     const result = await response.json()
+    console.log('[Open Project] result:', JSON.stringify(result, null, 2))
 
     if (result.code === 200) {
       currentProject.value = result.data.project
+      console.log('[Open Project] currentProject set to:', currentProject.value)
       // 加载标注
       if (result.data.annotations && result.data.annotations.length > 0) {
+        console.log('[Open Project] Loading', result.data.annotations.length, 'annotations')
         loadAnnotationsToMap(result.data.annotations)
       } else {
+        console.log('[Open Project] No annotations to load')
         vectorSource.clear()
       }
       ElMessage.success('项目加载成功')
@@ -1479,9 +1503,13 @@ const saveCurrentAnnotations = async () => {
 
   try {
     const annotations = getCurrentAnnotations()
-    const token = userStore.token
+    const token = localStorage.getItem('token')
 
-    const response = await fetch(`http://192.168.200.77:4000/api/projects/${currentProject.value.id}/annotations`, {
+    console.log('[Save Annotations] token:', token ? token.substring(0, 20) + '...' : 'null')
+    console.log('[Save Annotations] project id:', currentProject.value?.id)
+    console.log('[Save Annotations] annotations count:', annotations.length)
+
+    const response = await fetch(`/api/projects/${currentProject.value.id}/annotations`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -1510,8 +1538,8 @@ const exportShapefile = () => {
     return
   }
 
-  const token = userStore.token
-  const url = `http://192.168.200.77:4000/api/projects/${currentProject.value.id}/export/shapefile`
+  const token = localStorage.getItem('token')
+  const url = `/api/projects/${currentProject.value.id}/export/shapefile`
 
   // 创建下载链接
   const link = document.createElement('a')
@@ -1556,8 +1584,8 @@ const exportGeoJSON = async () => {
   }
 
   try {
-    const token = userStore.token
-    const response = await fetch(`http://192.168.200.77:4000/api/projects/${currentProject.value.id}/export/geojson`, {
+    const token = localStorage.getItem('token')
+    const response = await fetch(`/api/projects/${currentProject.value.id}/export/geojson`, {
       method: 'GET',
       headers: {
         'Authorization': `Bearer ${token}`

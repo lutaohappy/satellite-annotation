@@ -2,27 +2,26 @@ import { createRouter, createWebHistory } from 'vue-router'
 
 const routes = [
   {
-    path: '/gis/login',
+    path: '/login',
     name: 'Login',
     component: () => import('@/views/Login.vue')
   },
   {
-    path: '/gis',
+    path: '/',
     name: 'Map',
     component: () => import('@/views/MapView.vue')
   }
 ]
 
 const router = createRouter({
-  history: createWebHistory(),
+  history: createWebHistory('/gis/'),
   routes
 })
 
 router.beforeEach((to, from, next) => {
-  // 测试模式：如果没有 token 且访问地图页面，直接跳转到登录
   const token = localStorage.getItem('token')
-  if (!to.path.startsWith('/gis/login') && !token) {
-    next('/gis/login')
+  if (to.path !== '/login' && !token) {
+    next('/login')
   } else {
     next()
   }

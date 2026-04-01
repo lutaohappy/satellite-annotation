@@ -66,9 +66,6 @@ const handleLogin = async () => {
   await formRef.value.validate(async (valid) => {
     if (valid) {
       loading.value = true
-      // 本地测试模式，不调用后端 API
-      // 实际部署时取消下面注释，删除本地模拟代码
-      /*
       try {
         const res = await api.post('/auth/login', form)
         userStore.setToken(res.token, res.username, res.role)
@@ -76,16 +73,9 @@ const handleLogin = async () => {
         router.push('/')
       } catch (error) {
         ElMessage.error(error.response?.data?.error || '登录失败')
-      }
-      */
-
-      // 本地测试模式：模拟登录成功
-      setTimeout(() => {
-        userStore.setToken('test-token', form.username, 'ROLE_ADMIN')
-        ElMessage.success('登录成功（测试模式）')
-        router.push('/')
+      } finally {
         loading.value = false
-      }, 500)
+      }
     }
   })
 }

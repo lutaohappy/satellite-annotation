@@ -1,5 +1,6 @@
 package com.annotation.satelliteannotationbackend.entity;
 
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import jakarta.persistence.*;
 import java.time.LocalDateTime;
 
@@ -8,6 +9,7 @@ import java.time.LocalDateTime;
  */
 @Entity
 @Table(name = "annotations")
+@JsonIgnoreProperties({"hibernateLazyInitializer", "handler"})
 public class Annotation {
 
     @Id

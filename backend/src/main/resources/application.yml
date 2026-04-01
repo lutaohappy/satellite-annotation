@@ -75,3 +75,9 @@ image:
 server:
   port: 4000
   address: 0.0.0.0
+
+logging:
+  level:
+    root: INFO
+    com.annotation: DEBUG
+    org.springframework.security: DEBUG

@@ -63,6 +63,8 @@
 
 <script setup>
 import { ref, computed, watch, onMounted } from 'vue'
+const BUILD_VERSION = '20260401-1630'
+console.log('[ProjectDialog] 当前版本:', BUILD_VERSION)
 import { ElMessage } from 'element-plus'
 import { useUserStore } from '@/stores/user'
 
@@ -111,13 +113,17 @@ watch(dialogVisible, async (val) => {
 const loadProjects = async () => {
   loading.value = true
   try {
-    const token = userStore.token
-    const response = await fetch('http://192.168.200.77:4000/api/projects', {
+    const token = localStorage.getItem('token')
+    console.log('[Load Projects] token:', token ? token.substring(0, 20) + '...' : 'null')
+    const response = await fetch('/api/projects', {
       method: 'GET',
       headers: {
-        'Authorization': `Bearer ${token}`
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json'
       }
     })
+
+    console.log('[Load Projects] response status:', response.status)
 
     const result = await response.json()
 
