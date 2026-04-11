@@ -7,10 +7,14 @@ spring:
 
   # 数据库配置
   datasource:
-    url: jdbc:postgresql://192.168.200.77:5432/satellite_annotation
+    url: jdbc:postgresql://192.168.200.77:5432/satellite_annotation?ssl=false&sslfactory=org.postgresql.ssl.NonValidatingFactory
     username: postgres
     password: postgres
     driver-class-name: org.postgresql.Driver
+    hikari:
+      connection-timeout: 60000
+      validation-timeout: 30000
+      login-timeout: 60
 
   jpa:
     hibernate:
@@ -18,7 +22,6 @@ spring:
     show-sql: true
     properties:
       hibernate:
-        dialect: org.hibernate.dialect.PostgreSQLDialect
         format_sql: true
 
   # 文件上传配置
@@ -38,8 +41,8 @@ jwt:
 
 # 影像配置
 image:
-  upload-dir: uploads/images/
-  tile-dir: uploads/tiles/
+  upload-dir: /Users/taolu/Downloads/test/satellite-annotation/backend/uploads/images/
+  tile-dir: /Users/taolu/Downloads/test/satellite-annotation/backend/uploads/tiles/
   max-size: 1073741824  # 1GB
 
 # 日志配置
@@ -48,6 +51,7 @@ logging:
     root: INFO
     com.annotation: DEBUG
     org.springframework.security: WARN
+    org.springframework.web.servlet: DEBUG
 
 ---
 spring:

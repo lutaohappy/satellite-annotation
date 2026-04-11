@@ -3,11 +3,13 @@ package com.annotation.satelliteannotationbackend.controller;
 import com.annotation.satelliteannotationbackend.dto.ApiResponse;
 import com.annotation.satelliteannotationbackend.dto.ProjectDTO;
 import com.annotation.satelliteannotationbackend.entity.Annotation;
+import com.annotation.satelliteannotationbackend.entity.Image;
 import com.annotation.satelliteannotationbackend.entity.Project;
 import com.annotation.satelliteannotationbackend.entity.User;
 import com.annotation.satelliteannotationbackend.repository.AnnotationRepository;
 import com.annotation.satelliteannotationbackend.repository.ProjectRepository;
 import com.annotation.satelliteannotationbackend.repository.UserRepository;
+import com.annotation.satelliteannotationbackend.repository.ImageRepository;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
@@ -40,15 +42,18 @@ public class ProjectController {
     private final ProjectRepository projectRepository;
     private final AnnotationRepository annotationRepository;
     private final UserRepository userRepository;
+    private final ImageRepository imageRepository;
     private final ObjectMapper objectMapper;
 
     public ProjectController(ProjectRepository projectRepository,
                            AnnotationRepository annotationRepository,
                            UserRepository userRepository,
+                           ImageRepository imageRepository,
                            ObjectMapper objectMapper) {
         this.projectRepository = projectRepository;
         this.annotationRepository = annotationRepository;
         this.userRepository = userRepository;
+        this.imageRepository = imageRepository;
         this.objectMapper = objectMapper;
     }
 
@@ -68,12 +73,20 @@ public class ProjectController {
             dto.setDescription(project.getDescription());
             dto.setUserId(project.getUserId());
             dto.setCrs(project.getCrs());
+            dto.setBaseImageId(project.getBaseImageId());
             dto.setCreatedAt(project.getCreatedAt());
             dto.setUpdatedAt(project.getUpdatedAt());
 
             // 统计标注数量
             long count = annotationRepository.countByProjectId(project.getId());
             dto.setAnnotationCount(count);
+
+            // 获取影像文件名
+            if (project.getBaseImageId() != null) {
+                imageRepository.findById(project.getBaseImageId()).ifPresent(image -> {
+                    dto.setBaseImageName(image.getName());
+                });
+            }
 
             return dto;
         }).collect(Collectors.toList());
@@ -90,6 +103,7 @@ public class ProjectController {
         String name = body.get("name");
         String description = body.get("description");
         String crs = body.getOrDefault("crs", "EPSG:3857");
+        String baseImageIdStr = body.get("baseImageId");
 
         if (name == null || name.trim().isEmpty()) {
             return ResponseEntity.badRequest().body(ApiResponse.error("项目名称不能为空"));
@@ -103,6 +117,9 @@ public class ProjectController {
         project.setDescription(description);
         project.setCrs(crs);
         project.setUserId(user.getId());
+        if (baseImageIdStr != null && !baseImageIdStr.isEmpty()) {
+            project.setBaseImageId(Long.parseLong(baseImageIdStr));
+        }
 
         Project saved = projectRepository.save(project);
 
@@ -115,6 +132,45 @@ public class ProjectController {
         dto.setCreatedAt(saved.getCreatedAt());
         dto.setUpdatedAt(saved.getUpdatedAt());
         dto.setAnnotationCount(0L);
+
+        return ResponseEntity.ok(ApiResponse.success(dto));
+    }
+
+    /**
+     * 更新项目信息（如底图影像 ID）
+     */
+    @PutMapping("/{id}")
+    public ResponseEntity<?> updateProject(@PathVariable Long id,
+                                          @RequestBody Map<String, String> body,
+                                          @AuthenticationPrincipal UserDetails userDetails) {
+        Project project = projectRepository.findById(id)
+                .orElseThrow(() -> new RuntimeException("项目不存在"));
+
+        // 验证项目所有权
+        User user = userRepository.findByUsername(userDetails.getUsername())
+                .orElseThrow(() -> new RuntimeException("用户不存在"));
+        if (!project.getUserId().equals(user.getId())) {
+            return ResponseEntity.status(403).body(ApiResponse.error("无权修改此项目"));
+        }
+
+        // 更新底图影像 ID
+        String baseImageIdStr = body.get("baseImageId");
+        if (baseImageIdStr != null && !baseImageIdStr.isEmpty()) {
+            project.setBaseImageId(Long.parseLong(baseImageIdStr));
+        }
+
+        project.setUpdatedAt(LocalDateTime.now());
+        Project saved = projectRepository.save(project);
+
+        ProjectDTO dto = new ProjectDTO();
+        dto.setId(saved.getId());
+        dto.setName(saved.getName());
+        dto.setDescription(saved.getDescription());
+        dto.setUserId(saved.getUserId());
+        dto.setCrs(saved.getCrs());
+        dto.setBaseImageId(saved.getBaseImageId());
+        dto.setCreatedAt(saved.getCreatedAt());
+        dto.setUpdatedAt(saved.getUpdatedAt());
 
         return ResponseEntity.ok(ApiResponse.success(dto));
     }
@@ -133,6 +189,7 @@ public class ProjectController {
         dto.setDescription(project.getDescription());
         dto.setUserId(project.getUserId());
         dto.setCrs(project.getCrs());
+        dto.setBaseImageId(project.getBaseImageId());
         dto.setCreatedAt(project.getCreatedAt());
         dto.setUpdatedAt(project.getUpdatedAt());
 

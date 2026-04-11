@@ -1,0 +1,33 @@
+spring:
+  datasource:
+    url: jdbc:postgresql://192.168.200.77:5432/satellite_annotation?ssl=false
+    username: postgres
+    password: postgres
+    driver-class-name: org.postgresql.Driver
+    hikari:
+      connection-timeout: 60000
+      validation-timeout: 30000
+
+  jpa:
+    hibernate:
+      ddl-auto: update
+    show-sql: false
+
+server:
+  port: 4000
+  address: 0.0.0.0
+
+jwt:
+  secret: satellite-annotation-system-secret-key-must-be-changed-in-production
+  expiration: 86400000
+
+image:
+  upload-dir: /opt/uploads/images/
+  tile-dir: /opt/uploads/tiles/
+  max-size: 1073741824
+
+logging:
+  level:
+    root: INFO
+    com.annotation: DEBUG
+    org.springframework.security: WARN

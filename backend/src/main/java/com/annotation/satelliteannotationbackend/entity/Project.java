@@ -26,6 +26,8 @@ public class Project {
 
     private String crs;  // 坐标系，如 EPSG:3857
 
+    private Long baseImageId;  // 底图影像 ID
+
     private LocalDateTime createdAt;
 
     private LocalDateTime updatedAt;
@@ -51,6 +53,8 @@ public class Project {
     public void setUserId(Long userId) { this.userId = userId; }
     public String getCrs() { return crs; }
     public void setCrs(String crs) { this.crs = crs; }
+    public Long getBaseImageId() { return baseImageId; }
+    public void setBaseImageId(Long baseImageId) { this.baseImageId = baseImageId; }
     public LocalDateTime getCreatedAt() { return createdAt; }
     public void setCreatedAt(LocalDateTime createdAt) { this.createdAt = createdAt; }
     public LocalDateTime getUpdatedAt() { return updatedAt; }

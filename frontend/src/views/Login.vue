@@ -67,7 +67,7 @@ const handleLogin = async () => {
     if (valid) {
       loading.value = true
       try {
-        const res = await api.post('/auth/login', form)
+        const res = await api.post('/api/auth/login', form)
         userStore.setToken(res.token, res.username, res.role)
         ElMessage.success('登录成功')
         router.push('/')

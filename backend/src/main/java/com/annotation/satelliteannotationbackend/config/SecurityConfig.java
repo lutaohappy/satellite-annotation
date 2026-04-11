@@ -48,7 +48,24 @@ public class SecurityConfig {
                 .csrf(AbstractHttpConfigurer::disable)
                 .sessionManagement(sess -> sess.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth
-                        .requestMatchers("/api/auth/**", "/api/public/**").permitAll()
+                        .requestMatchers(
+                                "/api/auth/**",
+                                "/api/public/**",
+                                "/api/images/**",
+                                "/api/admin/**",
+                                "/error",
+                                "/",
+                                "/index.html",
+                                "/*.html",
+                                "/*.js",
+                                "/*.css",
+                                "/*.svg",
+                                "/*.ico",
+                                "/assets/**",
+                                "/static/**",
+                                "/gis/**",
+                                "/h2-console/**"
+                        ).permitAll()
                         .requestMatchers("/api/admin/**").hasRole("ADMIN")
                         .anyRequest().authenticated()
                 )

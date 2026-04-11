@@ -40,12 +40,19 @@
         </div>
       </el-tooltip>
 
-      <el-divider direction="vertical" />
-
       <el-button @click="clearAll" type="danger">清除全部</el-button>
 
       <!-- 符号库编辑按钮 -->
       <el-button @click="openSymbolLibrary">符号库编辑</el-button>
+
+      <el-divider direction="vertical" />
+
+      <!-- 影像功能 -->
+      <el-tooltip content="上传影像">
+        <el-button @click="openImageUpload">
+          <el-icon><Picture /></el-icon>
+        </el-button>
+      </el-tooltip>
 
       <el-divider direction="vertical" />
 
@@ -64,10 +71,11 @@
     </div>
 
     <!-- 地图容器 -->
-    <div ref="mapRef" class="map"></div>
+    <div ref="baseMapRef" class="map"></div>
 
-    <!-- 工具面板组件（量测 + 符号库） -->
+    <!-- 工具面板组件（量测 + 符号库 + 影像） -->
     <MapTools
+      ref="mapToolsRef"
       v-if="mapInitialized"
       :map="map"
       :vector-source="vectorSource"
@@ -76,6 +84,12 @@
       @measure-result="handleMeasureResult"
       @symbol-select="handleToolSymbolSelect"
       @symbols-change="handleSymbolsChange"
+      @open-upload="openImageUpload"
+      @open-swipe="openImageSwipe"
+      @image-load="handleImageLoad"
+      @image-adjustment="handleImageAdjustment"
+      @create-project="handleCreateProjectFromTool"
+      @create-placeholder-project="handleCreatePlaceholderProject"
     />
 
     <!-- 状态栏 -->
@@ -120,6 +134,18 @@
         <span>粘贴</span>
       </div>
     </div>
+
+    <!-- 影像上传对话框 -->
+    <ImageUpload
+      v-model="imageUploadVisible"
+      :projectId="currentProject?.id"
+      :batch-uuid="uploadBatchUuid"
+      :batch-name="uploadBatchName"
+      @uploaded="handleImageUploaded"
+    />
+
+    <!-- 影像对比对话框 -->
+    <ImageSwipe v-model="imageSwipeVisible" />
   </div>
 </template>
 
@@ -127,16 +153,21 @@
 import { ref, onMounted, onUnmounted, onBeforeUnmount } from 'vue'
 import { useRouter } from 'vue-router'
 import { useUserStore } from '@/stores/user'
+import { useImageStore } from '@/stores/image'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Connection, DocumentCopy } from '@element-plus/icons-vue'
+import { Connection, DocumentCopy, Picture } from '@element-plus/icons-vue'
 import MapTools from '@/components/MapTools.vue'
 import SymbolEditDialog from '@/components/SymbolEditDialog.vue'
 import ProjectDialog from '@/components/ProjectDialog.vue'
+import ImageUpload from '@/components/ImageUpload.vue'
+import ImageSwipe from '@/components/ImageSwipe.vue'
 import Map from 'ol/Map'
 import View from 'ol/View'
 import TileLayer from 'ol/layer/Tile'
+import ImageLayer from 'ol/layer/Image'
 import VectorLayer from 'ol/layer/Vector'
 import VectorSource from 'ol/source/Vector'
+import Static from 'ol/source/ImageStatic'
 import Feature from 'ol/Feature'
 import { fromLonLat } from 'ol/proj'
 import MousePosition from 'ol/control/MousePosition'
@@ -145,19 +176,23 @@ import XYZ from 'ol/source/XYZ'
 import { Style, Icon, Stroke, Fill, Circle } from 'ol/style'
 import { Circle as CircleGeom, Polygon, Point, LineString } from 'ol/geom'
 import { fromExtent } from 'ol/geom/Polygon'
+import { getImages, getImage, getImageFileUrl, getImagePreviewUrl, createPlaceholder } from '@/api/image'
 
 // 版本号（用于调试）
-const BUILD_VERSION = '20260401-1930'
+const BUILD_VERSION = '20260410-29-影像列表新建项目表单'
+console.log('[MapView] 当前版本:', BUILD_VERSION)
 console.log('%c [Map] 当前版本:', 'background: #f00; color: #fff; font-size: 16px;', BUILD_VERSION)
-console.log('%c [Map] 如果看到这个日志，说明加载的是新代码！', 'background: #0f0; color: #000; font-size: 14px;')
+console.log('%c [Map] 双层地图架构：底层 (底图 + 影像) + 上层 (矢量标注)', 'background: #00f; color: #fff; font-size: 14px;')
 
 const router = useRouter()
 const userStore = useUserStore()
 const mapRef = ref(null)
+const baseMapRef = ref(null)  // 地图容器
 
-let map = null
+let map = null  // 地图引用
 let vectorSource = null
 let vectorLayer = null
+let tileLayer = null  // OSM 底图图层
 let draw = null
 let modify = null
 let select = null
@@ -174,6 +209,9 @@ const measureCallback = ref(null)
 // 符号相关
 const selectedSymbol = ref(null)
 const symbolEditDialogVisible = ref(false)
+
+// MapTools 引用
+const mapToolsRef = ref(null)
 
 // 项目管理相关
 const projectDialogVisible = ref(false)
@@ -283,34 +321,35 @@ const saveSymbolsToStorage = (symbolsData) => {
 
 const symbols = ref(loadSymbolsFromStorage())
 
+// 影像相关
+const imageStore = useImageStore()
+const imageUploadVisible = ref(false)
+const imageSwipeVisible = ref(false)
+const imageLayer = ref(null)
+
 const handleLogout = () => {
   userStore.logout()
   router.push('/login')
 }
 
 const initMap = () => {
-  // 创建矢量图层用于标注
-  vectorSource = new VectorSource()
-  vectorLayer = new VectorLayer({
-    source: vectorSource,
-    style: (feature) => {
-      // 如果要素自己有样式，使用要素样式
-      const featureStyle = feature.getStyle()
-      if (featureStyle) {
-        return featureStyle
-      }
-      // 否则使用默认样式
-      return getDefaultStyle()
-    }
-  })
+  console.log('[InitMap] 开始初始化单层地图架构')
 
   // 创建 XYZ 瓦片图层（使用 OSM 作为测试）
-  const tileLayer = new TileLayer({
+  tileLayer = new TileLayer({
     source: new XYZ({
       url: 'https://{a-c}.tile.openstreetmap.org/{z}/{x}/{y}.png',
       crossOrigin: 'anonymous'
     }),
-    visible: true
+    visible: true,
+    zIndex: 0
+  })
+
+  // 空影像图层（后续加载 GeoTIFF 时设置 source）
+  imageLayer.value = new ImageLayer({
+    source: null,
+    visible: false,
+    zIndex: 1
   })
 
   // 鼠标位置显示
@@ -322,82 +361,83 @@ const initMap = () => {
     className: 'mouse-position'
   })
 
-  // 创建地图
-  map = new Map({
-    target: mapRef.value,
-    layers: [tileLayer, vectorLayer],
-    view: new View({
-      center: fromLonLat([116.4, 39.9]), // 北京
-      zoom: 10,
-      minZoom: 2,
-      maxZoom: 18
-    }),
-    controls: [mousePositionControl]
+  // 创建视图
+  const mapView = new View({
+    center: fromLonLat([116.4, 39.9]),
+    zoom: 10,
+    minZoom: 2,
+    maxZoom: 18
   })
 
-  // 监听视图变化
-  map.getView().on('change:center', updateStatus)
-  map.getView().on('change:resolution', updateStatus)
+  // ========== 单层地图：所有图层都在一个 Map 中 ==========
+  vectorSource = new VectorSource()
+  vectorLayer = new VectorLayer({
+    source: vectorSource,
+    style: (feature) => {
+      const featureStyle = feature.getStyle()
+      if (featureStyle) {
+        return featureStyle
+      }
+      return getDefaultStyle()
+    },
+    renderMode: 'hybrid',
+    zIndex: 2  // 关键：矢量图层始终在最上面
+  })
 
-  // 添加选择交互 - 完全不在 style 函数中处理，避免递归
-  console.log('[Select init] 创建 Select 交互，版本:', BUILD_VERSION.value)
+  // 创建地图 - 所有图层都在一个 Map 中
+  map = new Map({
+    target: baseMapRef.value,
+    layers: [tileLayer, imageLayer.value, vectorLayer],  // 按顺序添加
+    view: mapView,
+    controls: [mousePositionControl],
+    interactions: []
+  })
+
+  // 监听视图变化（用于状态栏）
+  mapView.on('change:center', updateStatus)
+  mapView.on('change:resolution', updateStatus)
+
+  // ========== 交互添加到地图 ==========
+  console.log('[Select init] 创建 Select 交互，版本:', BUILD_VERSION)
   select = new Select({
-    // 不设置 style 函数，完全在 select 事件中手动处理
     style: null
   })
-
   map.addInteraction(select)
 
-  // 监听右键点击事件，显示上下文菜单
+  // 监听右键点击事件
   map.on('contextmenu', (e) => {
     e.preventDefault()
-
-    // 隐藏菜单
     contextMenuVisible.value = false
 
-    // 获取点击位置的要素
-    const clickedFeature = map.forEachFeatureAtPixel(e.pixel, (feature) => {
-      return feature
-    })
+    const clickedFeature = map.forEachFeatureAtPixel(e.pixel, (feature) => feature)
 
-    // 设置菜单位置
     contextMenuPosition.value = {
       x: e.originalEvent.clientX,
       y: e.originalEvent.clientY
     }
 
-    // 如果已复制要素，任意位置右键都显示菜单（包含粘贴选项）
     if (copiedFeature.value) {
-      // 如果点击到要素，也设置成可复制的要素
       if (clickedFeature) {
         contextMenuFeature.value = clickedFeature
       }
       contextMenuVisible.value = true
     } else if (clickedFeature) {
-      // 没有复制要素时，只有点击到要素才显示菜单（只有复制选项）
       contextMenuFeature.value = clickedFeature
       contextMenuVisible.value = true
     }
   })
 
-  // 点击地图时关闭上下文菜单
   map.on('click', () => {
     contextMenuVisible.value = false
   })
 
-  // 监听点击事件，实现删除功能
   map.on('click', (e) => {
-    // 只有在删除模式下才执行删除
     if (editMode.value !== 'delete') return
 
-    const clickedFeature = map.forEachFeatureAtPixel(e.pixel, (feature) => {
-      return feature
-    })
-
+    const clickedFeature = map.forEachFeatureAtPixel(e.pixel, (feature) => feature)
     if (clickedFeature) {
       console.log('[Delete] 删除要素:', clickedFeature)
       vectorSource.removeFeature(clickedFeature)
-      // 触发重绘
       if (vectorLayer) {
         vectorLayer.changed()
       }
@@ -412,7 +452,7 @@ const initMap = () => {
 
     console.log('[Select] === select 事件开始 ===')
     console.log('[Select] selected:', selected.length, 'deselected:', deselected.length)
-    console.log('[Select] 版本:', BUILD_VERSION.value)
+    console.log('[Select] 版本:', BUILD_VERSION)
 
     // 恢复被取消选择的要素的原始样式
     deselected.forEach(feature => {
@@ -1089,7 +1129,7 @@ const setDrawType = (type, callback = null) => {
     }
 
     const feature = event.feature
-    console.log('[Draw] drawend 事件，版本:', BUILD_VERSION.value)
+    console.log('[Draw] drawend 事件，版本:', BUILD_VERSION)
     console.log('[Draw] feature:', feature)
     console.log('[Draw] feature keys:', feature.getKeys())
 
@@ -1130,6 +1170,18 @@ const setDrawType = (type, callback = null) => {
         measureCallback.value = null
         statusMessage.value = '量测完成'
       }, 50)
+    }
+
+    // 绘制项目区域模式
+    if (isDrawingProjectArea.value && currentProject.value) {
+      // 创建占位图
+      createPlaceholderImageFromDrawnArea(feature)
+      // 重置标志
+      isDrawingProjectArea.value = false
+      // 清除绘制工具
+      map.removeInteraction(draw)
+      draw = null
+      drawType.value = null
     }
   })
 
@@ -1605,6 +1657,25 @@ const loadAnnotationsToMap = (annotations) => {
   })
 
   console.log('[LoadAnnotations] Final vectorSource features count:', vectorSource.getFeatures().length)
+
+  // 强制重绘
+  map.renderSync()
+  vectorLayer.changed()
+
+  console.log('[LoadAnnotations] 已强制重绘地图')
+
+  // 缩放到标注范围
+  if (vectorSource.getFeatures().length > 0) {
+    const extent = vectorSource.getExtent()
+    if (extent && extent[0] !== Infinity) {
+      console.log('[LoadAnnotations] 缩放到标注范围:', extent)
+      // 强制立即缩放，不使用动画
+      map.getView().fit(extent, { duration: 0, padding: [50, 50, 50, 50] })
+      // 触发图层重绘
+      vectorLayer.changed()
+    }
+  }
+
   statusMessage.value = `已加载 ${annotations.length} 个标注`
 }
 
@@ -1624,10 +1695,93 @@ const handleCreateProject = async (projectData) => {
     const result = await response.json()
 
     if (result.code === 200) {
+      console.log('[Create Project] 开始清理当前地图和标注')
+
+      // 设置新项目
       currentProject.value = result.data
+      console.log('[Create Project] 新项目已设置:', currentProject.value)
+
+      // 1. 清底图模块 - 清理底层地图
+      console.log('[Create Project] 清理前底层地图图层数量:', map.getLayers().getLength())
+      console.log('[Create Project] 清理前所有图层:', map.getLayers().getArray().map(l => l.constructor.name))
+
+      // 1.1 移除底层地图所有图层
+      const allLayers = map.getLayers().getArray().slice()
+      allLayers.forEach(layer => {
+        map.removeLayer(layer)
+        console.log('[Create Project] 移除图层:', layer.constructor.name)
+      })
+      tileLayer = null
+      imageLayer.value = null
+
+      // 1.2 添加 OSM 底图
+      tileLayer = new TileLayer({
+        source: new XYZ({
+          url: 'https://{a-c}.tile.openstreetmap.org/{z}/{x}/{y}.png',
+          crossOrigin: 'anonymous'
+        })
+      })
+      map.addLayer(tileLayer)
+      console.log('[Create Project] OSM 底图已添加到底层地图')
+
+      // 1.3 创建空影像图层
+      imageLayer.value = new ImageLayer({
+        source: null,
+        visible: false,
+        zIndex: 1
+      })
+      map.addLayer(imageLayer.value)
+      console.log('[Create Project] 空影像图层已添加到底层地图')
+
+      // 1.4 重新创建矢量图层
+      vectorSource = new VectorSource()
+      vectorLayer = new VectorLayer({
+        source: vectorSource,
+        style: (feature) => {
+          const featureStyle = feature.getStyle()
+          if (featureStyle) {
+            return featureStyle
+          }
+          return getDefaultStyle()
+        },
+        zIndex: 999  // 最高优先级，确保矢量在最上层
+      })
+      map.addLayer(vectorLayer)
+      console.log('[Create Project] 矢量图层已重新创建并添加')
+
+      // 1.5 强制重绘
+      map.render()
+      console.log('[Create Project] map.render() 已调用')
+      console.log('[Create Project] 清理后底层地图图层数量:', map.getLayers().getLength())
+      console.log('[Create Project] 清理后所有图层:', map.getLayers().getArray().map(l => l.constructor.name))
+      imageStore.setCurrentImage(null)
+      currentProject.value.baseImageId = null
+      console.log('[Create Project] imageStore 和 baseImageId 已清空')
+
+      // 2. 清矢量模块 - 清理上层矢量地图
+      vectorSource.clear()
+      console.log('[Create Project] 矢量标注已清空')
+
       ElMessage.success('项目创建成功')
       projectDialogVisible.value = false
-      // 自动保存当前标注
+
+      // 根据创建方式处理
+      if (projectData.method === 'image' && projectData.imageId) {
+        // 方式一：已选择影像，直接加载
+        console.log('[Create Project] 已选择影像，加载影像:', projectData.imageId)
+        await loadBaseImage(projectData.imageId)
+      } else if (projectData.method === 'draw') {
+        // 方式二：需要绘制项目区域
+        console.log('[Create Project] 需要绘制项目区域')
+        ElMessage.info('请在地图上使用面标注工具绘制项目范围，绘制完成后点击保存按钮')
+        // 自动激活面标注工具
+        setDrawType('Polygon')
+      } else {
+        // 旧方式：创建占位影像
+        await createPlaceholderImage()
+      }
+
+      // 自动保存当前标注（新项目没有标注）
       await saveCurrentAnnotations()
     } else {
       ElMessage.error(result.message || '创建项目失败')
@@ -1635,6 +1789,76 @@ const handleCreateProject = async (projectData) => {
   } catch (error) {
     console.error('创建项目失败:', error)
     ElMessage.error('创建项目失败：' + error.message)
+  }
+}
+
+// 创建占位影像（旧方式，兼容用）
+const createPlaceholderImage = async () => {
+  try {
+    const placeholderToken = localStorage.getItem('token')
+
+    // 计算当前视图范围作为占位影像范围
+    const view = map.getView()
+    const center = view.getCenter()
+    const resolution = view.getResolution()
+    const size = map.getSize()
+
+    if (center && resolution && size) {
+      const widthInMeters = resolution * size[0]
+      const heightInMeters = resolution * size[1]
+
+      const minX = center[0] - widthInMeters / 2
+      const minY = center[1] - heightInMeters / 2
+      const maxX = center[0] + widthInMeters / 2
+      const maxY = center[1] + heightInMeters / 2
+
+      console.log('[Create Project] 创建占位影像，范围:', { minX, minY, maxX, maxY })
+
+      const placeholderResponse = await fetch('/api/images/create-placeholder', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${placeholderToken}`
+        },
+        body: JSON.stringify({
+          minX, minY, maxX, maxY,
+          projectId: currentProject.value.id
+        })
+      })
+
+      const placeholderResult = await placeholderResponse.json()
+
+      if (placeholderResult.code === 200) {
+        const placeholderImage = placeholderResult.data
+        console.log('[Create Project] 占位影像创建成功:', placeholderImage)
+
+        // 更新项目的 baseImageId
+        await fetch(`/api/projects/${currentProject.value.id}`, {
+          method: 'PUT',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${placeholderToken}`
+          },
+          body: JSON.stringify({
+            baseImageId: placeholderImage.id
+          })
+        })
+
+        // 加载占位影像
+        await loadBaseImage(placeholderImage.id)
+
+        console.log('[Create Project] 占位影像已加载')
+      } else {
+        console.error('[Create Project] 创建占位影像失败:', placeholderResult.message)
+        await updateProjectBaseImageId(null)
+      }
+    } else {
+      console.warn('[Create Project] 无法计算视图范围，将 baseImageId 设为 null')
+      await updateProjectBaseImageId(null)
+    }
+  } catch (error) {
+    console.error('[Create Project] 创建占位影像异常:', error)
+    await updateProjectBaseImageId(null)
   }
 }
 
@@ -1658,16 +1882,109 @@ const handleOpenProject = async (project) => {
     console.log('[Open Project] result:', JSON.stringify(result, null, 2))
 
     if (result.code === 200) {
+      console.log('[Open Project] 开始清理旧项目图层')
+
+      // 清除底层地图所有图层
+      const allLayers = map.getLayers().getArray().slice()
+      allLayers.forEach(layer => {
+        map.removeLayer(layer)
+        console.log('[Open Project] 移除旧图层:', layer.constructor.name)
+      })
+
+      // 重置图层
+      tileLayer = null
+      imageLayer.value = null
+      vectorSource.clear()
+      console.log('[Open Project] 旧图层已清空')
+
       currentProject.value = result.data.project
       console.log('[Open Project] currentProject set to:', currentProject.value)
-      // 加载标注
-      if (result.data.annotations && result.data.annotations.length > 0) {
+
+      // 1. 添加 OSM 底图到底层地图
+      tileLayer = new TileLayer({
+        source: new XYZ({
+          url: 'https://{a-c}.tile.openstreetmap.org/{z}/{x}/{y}.png',
+          crossOrigin: 'anonymous'
+        })
+      })
+      map.addLayer(tileLayer)
+      console.log('[Open Project] OSM 底图已添加到底层地图')
+
+      // 2. 创建影像图层（所有项目都有影像图层，保持统一流程）
+      imageLayer.value = new ImageLayer({
+        source: null,
+        visible: false,
+        zIndex: 1
+      })
+      map.addLayer(imageLayer.value)
+      console.log('[Open Project] 空影像图层已添加到底层地图')
+
+      // 3. 重新创建并添加矢量图层
+      vectorSource = new VectorSource()
+      vectorLayer = new VectorLayer({
+        source: vectorSource,
+        style: (feature) => {
+          const featureStyle = feature.getStyle()
+          if (featureStyle) {
+            return featureStyle
+          }
+          return getDefaultStyle()
+        },
+        zIndex: 999  // 最高优先级，确保矢量在最上层
+      })
+      map.addLayer(vectorLayer)
+      console.log('[Open Project] 矢量图层已重新创建并添加')
+
+      // 重新添加交互（因为矢量图层已重新创建）
+      console.log('[Open Project] 重新创建交互')
+
+      // 移除旧交互
+      if (select) map.removeInteraction(select)
+      if (modify) map.removeInteraction(modify)
+      if (translate) map.removeInteraction(translate)
+      if (draw) map.removeInteraction(draw)
+
+      // 重新创建交互
+      select = new Select({ style: null })
+      map.addInteraction(select)
+
+      modify = new Modify({
+        features: select.getFeatures(),
+        style: new Style({
+          image: new Circle({
+            radius: 5,
+            fill: new Fill({ color: '#ff0000' }),
+            stroke: new Stroke({ color: '#fff', width: 2 })
+          })
+        }),
+        hitTolerance: 10
+      })
+      map.addInteraction(modify)
+
+      translate = new Translate({
+        features: select.getFeatures(),
+        hitTolerance: 5
+      })
+      map.addInteraction(translate)
+
+      console.log('[Open Project] 交互已重新创建')
+
+      // 先加载标注
+      const hasAnnotations = result.data.annotations && result.data.annotations.length > 0
+      if (hasAnnotations) {
         console.log('[Open Project] Loading', result.data.annotations.length, 'annotations')
         loadAnnotationsToMap(result.data.annotations)
       } else {
         console.log('[Open Project] No annotations to load')
         vectorSource.clear()
       }
+
+      // 加载底图影像（所有项目都调用，保持统一流程）
+      if (result.data.project.baseImageId) {
+        console.log('[Open Project] 加载底图影像 ID:', result.data.project.baseImageId)
+        await loadBaseImage(result.data.project.baseImageId)
+      }
+
       ElMessage.success('项目加载成功')
       projectDialogVisible.value = false
     } else {
@@ -1691,6 +2008,28 @@ const saveCurrentProject = () => {
   saveCurrentAnnotations()
 }
 
+// 更新项目的 baseImageId
+const updateProjectBaseImageId = async (baseImageId) => {
+  if (!currentProject.value?.id) return
+
+  try {
+    const token = localStorage.getItem('token')
+    await fetch(`/api/projects/${currentProject.value.id}`, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`
+      },
+      body: JSON.stringify({
+        baseImageId
+      })
+    })
+    console.log('[Update Project] baseImageId 已更新为:', baseImageId)
+  } catch (error) {
+    console.error('[Update Project] 更新 baseImageId 失败:', error)
+  }
+}
+
 // 保存当前标注到项目
 const saveCurrentAnnotations = async () => {
   if (!currentProject.value) {
@@ -1699,6 +2038,67 @@ const saveCurrentAnnotations = async () => {
   }
 
   try {
+    // 详细调试日志
+    console.log('[Save Annotations] ====== 开始保存 ======')
+    console.log('[Save Annotations] currentProject:', currentProject.value)
+    console.log('[Save Annotations] imageStore:', imageStore)
+    console.log('[Save Annotations] imageStore.currentImage:', imageStore.currentImage)
+    console.log('[Save Annotations] imageStore.currentImage?.id:', imageStore.currentImage?.id)
+    console.log('[Save Annotations] imageLayer:', imageLayer.value)
+
+    // 检查是否有加载的影像（通过 imageLayer 判断）
+    const hasImageLayer = imageLayer.value !== null
+    console.log('[Save Annotations] hasImageLayer:', hasImageLayer)
+
+    // 如果没有影像且有标注，可能是绘制项目区域模式，创建占位图
+    const hasAnnotations = vectorSource.getFeatures().length > 0
+    const needsPlaceholder = !hasImageLayer && hasAnnotations && !currentProject.value.baseImageId
+
+    if (needsPlaceholder) {
+      console.log('[Save Annotations] 绘制区域模式，创建占位影像')
+      await createPlaceholderImageFromAnnotations()
+    }
+
+    if (imageStore.currentImage && imageStore.currentImage.id) {
+      console.log('[Save Annotations] 更新项目底图影像 ID:', imageStore.currentImage.id)
+      const token = localStorage.getItem('token')
+      const updateResponse = await fetch(`/api/projects/${currentProject.value.id}`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          baseImageId: imageStore.currentImage.id.toString()
+        })
+      })
+      const updateResult = await updateResponse.json()
+      console.log('[Save Annotations] 更新底图结果:', updateResult)
+      // 更新当前项目的 baseImageId
+      currentProject.value.baseImageId = imageStore.currentImage.id
+    } else {
+      console.log('[Save Annotations] 没有当前影像，将 baseImageId 设为 null')
+      // 没有影像时，将项目的 baseImageId 设为 null 并保存到数据库
+      currentProject.value.baseImageId = null
+      // 可选：更新数据库中的项目记录
+      try {
+        const token = localStorage.getItem('token')
+        await fetch(`/api/projects/${currentProject.value.id}`, {
+          method: 'PUT',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`
+          },
+          body: JSON.stringify({
+            baseImageId: null
+          })
+        })
+        console.log('[Save Annotations] 已将数据库中的 baseImageId 设为 null')
+      } catch (error) {
+        console.error('[Save Annotations] 更新 baseImageId 失败:', error)
+      }
+    }
+
     const annotations = getCurrentAnnotations()
     const token = localStorage.getItem('token')
 
@@ -1725,6 +2125,144 @@ const saveCurrentAnnotations = async () => {
   } catch (error) {
     console.error('保存标注失败:', error)
     ElMessage.error('保存标注失败：' + error.message)
+  }
+}
+
+// 根据标注范围创建占位影像
+const createPlaceholderImageFromAnnotations = async () => {
+  try {
+    const features = vectorSource.getFeatures()
+    if (features.length === 0) return
+
+    // 计算所有标注的范围
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity
+    features.forEach(feature => {
+      const geom = feature.getGeometry()
+      const extent = geom.getExtent()
+      minX = Math.min(minX, extent[0])
+      minY = Math.min(minY, extent[1])
+      maxX = Math.max(maxX, extent[2])
+      maxY = Math.max(maxY, extent[3])
+    })
+
+    // 添加 10% 的边距
+    const paddingX = (maxX - minX) * 0.1
+    const paddingY = (maxY - minY) * 0.1
+    minX -= paddingX
+    minY -= paddingY
+    maxX += paddingX
+    maxY += paddingY
+
+    console.log('[Create Placeholder] 根据标注范围创建占位影像:', { minX, minY, maxX, maxY })
+
+    const placeholderToken = localStorage.getItem('token')
+    const placeholderResponse = await fetch('/api/images/create-placeholder', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${placeholderToken}`
+      },
+      body: JSON.stringify({
+        minX, minY, maxX, maxY,
+        projectId: currentProject.value.id
+      })
+    })
+
+    const placeholderResult = await placeholderResponse.json()
+
+    if (placeholderResult.code === 200) {
+      const placeholderImage = placeholderResult.data
+      console.log('[Create Placeholder] 占位影像创建成功:', placeholderImage)
+
+      // 更新项目的 baseImageId
+      await fetch(`/api/projects/${currentProject.value.id}`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${placeholderToken}`
+        },
+        body: JSON.stringify({
+          baseImageId: placeholderImage.id
+        })
+      })
+
+      // 设置 imageStore 的当前影像
+      imageStore.setCurrentImage(placeholderImage)
+
+      // 加载占位影像
+      await loadBaseImage(placeholderImage.id)
+
+      console.log('[Create Placeholder] 占位影像已加载')
+      ElMessage.success('项目范围已创建，现在可以加载同名影像继续标绘')
+    } else {
+      console.error('[Create Placeholder] 创建占位影像失败:', placeholderResult.message)
+      ElMessage.warning('创建项目范围失败，请重试')
+    }
+  } catch (error) {
+    console.error('[Create Placeholder] 创建占位影像异常:', error)
+    ElMessage.error('创建项目范围失败：' + error.message)
+  }
+}
+
+// 根据绘制的区域创建占位影像
+const createPlaceholderImageFromDrawnArea = async (feature) => {
+  try {
+    const geom = feature.getGeometry()
+    const extent = geom.getExtent()
+    const [minX, minY, maxX, maxY] = extent
+
+    console.log('[Create Placeholder from Draw] 绘制范围:', { minX, minY, maxX, maxY })
+
+    // 先移除绘制的矩形要素
+    vectorSource.removeFeature(feature)
+    console.log('[Create Placeholder from Draw] 矩形框已移除')
+
+    const placeholderToken = localStorage.getItem('token')
+    const placeholderResponse = await fetch('/api/images/create-placeholder', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${placeholderToken}`
+      },
+      body: JSON.stringify({
+        minX, minY, maxX, maxY,
+        projectId: currentProject.value.id
+      })
+    })
+
+    const placeholderResult = await placeholderResponse.json()
+
+    if (placeholderResult.code === 200) {
+      const placeholderImage = placeholderResult.data
+      console.log('[Create Placeholder from Draw] 占位影像创建成功:', placeholderImage)
+
+      // 更新项目的 baseImageId
+      await fetch(`/api/projects/${currentProject.value.id}`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${placeholderToken}`
+        },
+        body: JSON.stringify({
+          baseImageId: placeholderImage.id
+        })
+      })
+
+      // 设置 imageStore 的当前影像
+      imageStore.setCurrentImage(placeholderImage)
+
+      // 加载占位影像（此时矩形框已移除，不会被保存）
+      await loadBaseImage(placeholderImage.id)
+
+      console.log('[Create Placeholder from Draw] 占位影像已加载')
+      ElMessage.success('项目范围已创建，现在可以加载影像继续标绘')
+    } else {
+      console.error('[Create Placeholder from Draw] 创建占位影像失败:', placeholderResult.message)
+      ElMessage.warning('创建项目范围失败，请重试')
+    }
+  } catch (error) {
+    console.error('[Create Placeholder from Draw] 创建占位影像异常:', error)
+    ElMessage.error('创建项目范围失败：' + error.message)
   }
 }
 
@@ -1812,8 +2350,663 @@ const exportGeoJSON = async () => {
   }
 }
 
+// ==================== 影像功能相关方法 ====================
+
+// 批次上传相关状态
+const uploadBatchUuid = ref(null)
+const uploadBatchName = ref('')
+
+// 打开上传对话框
+const openImageUpload = (batchInfo) => {
+  // batchInfo 可选，包含 { batchUuid, batchName }
+  if (batchInfo) {
+    uploadBatchUuid.value = batchInfo.batchUuid
+    uploadBatchName.value = batchInfo.batchName || ''
+  } else {
+    uploadBatchUuid.value = null
+    uploadBatchName.value = ''
+  }
+  imageUploadVisible.value = true
+}
+
+// 打开对比对话框
+const openImageSwipe = () => {
+  if (imageStore.images.length < 2) {
+    ElMessage.warning('至少需要两个影像才能进行对比')
+    return
+  }
+  imageSwipeVisible.value = true
+}
+
+// 处理影像上传成功
+const handleImageUploaded = async (uploadResult) => {
+  try {
+    console.log('[Upload] 上传结果:', uploadResult)
+    // uploadResult 包含 { batchUuid, fileCount, images: [...] }
+    const images = uploadResult.images || []
+    if (images.length === 0) {
+      ElMessage.error('上传成功，但没有影像文件')
+      return
+    }
+
+    // 添加所有影像到 store
+    images.forEach(img => imageStore.addImage(img))
+
+    // 刷新批次列表
+    if (mapToolsRef.value && mapToolsRef.value.loadBatches) {
+      await mapToolsRef.value.loadBatches()
+      console.log('[Upload] 批次列表已刷新')
+    }
+
+    ElMessage.success(`上传成功，共 ${uploadResult.fileCount} 个文件`)
+  } catch (error) {
+    console.error('[Upload] 加载影像失败:', error)
+    ElMessage.error('加载影像失败：' + error.message)
+  }
+}
+
+// 处理影像加载
+const handleImageLoad = (image) => {
+  loadGeoTIFF(image.id)
+}
+
+// 从工具栏创建项目（基于影像）
+const handleCreateProjectFromTool = (projectData) => {
+  console.log('[handleCreateProjectFromTool] projectData:', projectData)
+  // 项目已创建，现在加载影像
+  if (projectData.baseImageId || projectData.imageId) {
+    const imageId = projectData.baseImageId || projectData.imageId
+    console.log('[handleCreateProjectFromTool] 加载影像:', imageId)
+    // 先设置当前项目
+    currentProject.value = projectData
+    // 检查图层是否已初始化，如果没有，等待一下
+    if (!imageLayer.value || !vectorLayer) {
+      console.log('[handleCreateProjectFromTool] 图层未初始化，等待...')
+      setTimeout(() => {
+        loadBaseImage(imageId).then(() => {
+          console.log('[handleCreateProjectFromTool] 影像加载完成')
+          ElMessage.success('项目已创建，影像已加载')
+        }).catch(err => {
+          console.error('[handleCreateProjectFromTool] 影像加载失败:', err)
+          ElMessage.error('项目创建成功，但影像加载失败')
+        })
+      }, 500)
+    } else {
+      // 加载影像
+      loadBaseImage(imageId).then(() => {
+        console.log('[handleCreateProjectFromTool] 影像加载完成')
+        ElMessage.success('项目已创建，影像已加载')
+      }).catch(err => {
+        console.error('[handleCreateProjectFromTool] 影像加载失败:', err)
+        ElMessage.error('项目创建成功，但影像加载失败')
+      })
+    }
+  }
+}
+
+// 创建占位图项目 - 进入绘制矩形状态
+const handleCreatePlaceholderProject = (projectData) => {
+  console.log('[handleCreatePlaceholderProject] 开始创建占位图项目')
+
+  // 先清空当前地图状态
+  if (map) {
+    console.log('[handleCreatePlaceholderProject] 清空当前地图状态')
+    const allLayers = map.getLayers().getArray().slice()
+    allLayers.forEach(layer => {
+      map.removeLayer(layer)
+    })
+  }
+  tileLayer = null
+  imageLayer.value = null
+  vectorSource = new VectorSource()
+  vectorLayer = null
+  currentProject.value = null
+
+  // 设置新项目
+  currentProject.value = projectData
+  console.log('[handleCreatePlaceholderProject] 新项目已设置:', projectData)
+
+  // 重新初始化地图图层
+  if (map) {
+    // 添加 OSM 底图
+    tileLayer = new TileLayer({
+      source: new XYZ({
+        url: 'https://{a-c}.tile.openstreetmap.org/{z}/{x}/{y}.png',
+        crossOrigin: 'anonymous'
+      })
+    })
+    map.addLayer(tileLayer)
+
+    // 创建空影像图层
+    imageLayer.value = new ImageLayer({
+      source: null,
+      visible: false,
+      zIndex: 1
+    })
+    map.addLayer(imageLayer.value)
+
+    // 创建矢量图层
+    vectorSource = new VectorSource()
+    vectorLayer = new VectorLayer({
+      source: vectorSource,
+      style: (feature) => {
+        const featureStyle = feature.getStyle()
+        if (featureStyle) return featureStyle
+        return getDefaultStyle()
+      },
+      zIndex: 999
+    })
+    map.addLayer(vectorLayer)
+  }
+
+  ElMessage.info('请在地图上绘制矩形定义项目范围，双击完成绘制')
+  // 激活矩形绘制工具
+  setDrawType('Rectangle')
+  // 设置一个标志，表示正在绘制项目范围
+  isDrawingProjectArea.value = true
+}
+
+// 是否正在绘制项目区域
+const isDrawingProjectArea = ref(false)
+
+// 处理影像调整（实时预览）
+const handleImageAdjustment = (params) => {
+  if (!imageLayer.value) return
+
+  // 实时预览时使用 CSS filter（仅用于预览，不保存）
+  const filter = `brightness(${params.brightness}) contrast(${params.contrast})`
+
+  // 获取当前影像图层的 canvas 元素
+  const canvas = document.querySelector('.ol-layer canvas')
+  if (canvas) {
+    canvas.style.filter = filter
+  }
+
+  // 应用透明度
+  imageLayer.value.setOpacity(params.opacity)
+  imageLayer.value.changed()
+
+  imageStore.updateAdjustment(params)
+}
+
+// 确保矢量图层在最上层
+// 注意：使用双层地图架构后，矢量地图本身就是独立的上层，不需要此函数
+const ensureVectorLayerOnTop = () => {
+  // 双层地图架构下，矢量地图天然在最上层
+  // 只需要触发重绘
+  if (vectorLayer) {
+    vectorLayer.changed()
+  }
+  console.log('[ensureVectorLayerOnTop] 双层地图架构，矢量天然在最上层')
+}
+
+// 加载 GeoTIFF 影像到地图
+const loadGeoTIFF = async (imageId) => {
+  try {
+    console.log('[loadGeoTIFF] 开始加载影像:', imageId)
+    const res = await getImage(imageId)
+    if (res.code !== 200) {
+      ElMessage.error('加载影像失败')
+      return
+    }
+
+    const image = res.data
+    console.log('[loadGeoTIFF] 影像信息:', {
+      id: image.id,
+      name: image.name,
+      filePath: image.filePath,
+      fileSize: image.fileSize,
+      width: image.width,
+      height: image.height
+    })
+    imageStore.setCurrentImage(image)
+
+    // 计算影像范围
+    const extent = [
+      image.minX || 0, image.minY || 0,
+      image.maxX || 0, image.maxY || 0
+    ]
+
+    // 如果范围为 0，使用默认范围
+    if (extent[0] === 0 && extent[1] === 0 && extent[2] === 0 && extent[3] === 0) {
+      ElMessage.warning('影像范围信息缺失，使用默认范围')
+    }
+
+    // 关键修复：保存所有矢量要素
+    console.log('[loadGeoTIFF] 保存矢量要素，准备加载影像')
+    const features = vectorSource.getFeatures()
+    const featuresData = []
+    features.forEach(f => {
+      const geom = f.getGeometry()
+      featuresData.push({
+        geometry: geom.clone(),
+        properties: f.getProperties(),
+        style: f.getStyle()
+      })
+    })
+    console.log('[loadGeoTIFF] 保存了', featuresData.length, '个矢量要素')
+
+    // 清空矢量图层
+    vectorSource.clear()
+    console.log('[loadGeoTIFF] 矢量图层已清空')
+
+    // 创建新的影像 source
+    const timestamp = new Date().getTime()
+    const newSource = new Static({
+      url: `${getImagePreviewUrl(image.id)}?t=${timestamp}`,
+      crossOrigin: 'anonymous',
+      imageExtent: extent,
+      projection: 'EPSG:3857'
+    })
+
+    // 关键修复：检查地图上现有的影像图层数量
+    const allLayers = map.getLayers().getArray()
+    console.log('[loadGeoTIFF] 加载前图层数量:', allLayers.length)
+    console.log('[loadGeoTIFF] 加载前图层:', allLayers.map((l, i) => `${i}: ${l.constructor.name}`))
+
+    // 移除所有 ImageLayer 类型的图层
+    const imageLayers = allLayers.filter(l => l.constructor.name === 'ImageLayer' || l.constructor.name === 'rf')
+    console.log('[loadGeoTIFF] 要移除的影像图层数量:', imageLayers.length)
+    imageLayers.forEach(layer => {
+      map.removeLayer(layer)
+      console.log('[loadGeoTIFF] 已移除影像图层')
+    })
+
+    // 关键修复：先移除矢量图层，确保影像加载后矢量在最上层
+    console.log('[loadGeoTIFF] 移除矢量图层，准备加载影像')
+    map.removeLayer(vectorLayer)
+
+    // 创建新的影像图层
+    const newImageLayer = new ImageLayer({
+      source: newSource,
+      visible: true,
+      zIndex: 1
+    })
+
+    // 缩放到影像范围
+    if (extent[0] !== 0 || extent[1] !== 0 || extent[2] !== 0 || extent[3] !== 0) {
+      map.getView().fit(extent, { duration: 500, padding: [50, 50, 50, 50] })
+    }
+
+    // 添加影像图层
+    map.addLayer(newImageLayer)
+    imageLayer.value = newImageLayer
+
+    console.log('[loadGeoTIFF] 影像图层已重新创建')
+
+    // 关键修复：设置最高 zIndex 并重新添加矢量图层到最上层
+    vectorLayer.setZIndex(999)
+    map.addLayer(vectorLayer)
+
+    // 调试：检查图层顺序
+    const layersAfterReorder = map.getLayers().getArray()
+    console.log('[loadGeoTIFF] 重排后图层顺序:', layersAfterReorder.map((l, i) => `${i}: ${l.constructor.name}`))
+    console.log('[loadGeoTIFF] 矢量图层已重新添加，zIndex=999')
+
+    // 等待影像渲染完成后再添加矢量
+    await new Promise(resolve => setTimeout(resolve, 100))
+
+    // 重新添加所有矢量要素
+    console.log('[loadGeoTIFF] 开始重新添加矢量要素')
+    featuresData.forEach((data, idx) => {
+      const feature = new Feature({
+        geomType: data.properties.geomType,
+        isSymbol: data.properties.isSymbol,
+        symbolId: data.properties.symbolId,
+        symbolName: data.properties.symbolName
+      })
+      feature.setGeometry(data.geometry)
+      if (data.style) {
+        feature.setStyle(data.style)
+        console.log('[loadGeoTIFF] 要素', idx, '样式已恢复')
+      } else {
+        console.log('[loadGeoTIFF] 要素', idx, '无样式，使用默认')
+      }
+      vectorSource.addFeature(feature)
+    })
+
+    console.log('[loadGeoTIFF] 矢量要素已重新添加，共', vectorSource.getFeatures().length, '个')
+
+    // 强制重绘 - 关键修复：先隐藏再显示，确保 OpenLayers 完全重绘
+    vectorLayer.setVisible(false)
+    await new Promise(resolve => setTimeout(resolve, 50))
+    vectorLayer.setVisible(true)
+    vectorLayer.changed()
+    map.renderSync()
+
+    console.log('[loadGeoTIFF] 已强制重绘，矢量图层在最上层')
+
+    // 最终检查图层
+    const finalLayers = map.getLayers().getArray()
+    console.log('[loadGeoTIFF] 最终图层顺序:', finalLayers.map((l, i) => `${i}: ${l.constructor.name}`))
+
+    // 重置调整参数
+    imageStore.resetAdjustment()
+    console.log('[loadGeoTIFF] 影像加载完成，调整参数已重置')
+
+    ElMessage.success('影像加载成功')
+  } catch (error) {
+    console.error('加载影像失败:', error)
+    ElMessage.error('加载影像失败：' + error.message)
+  }
+}
+
+// 加载透明占位影像（用于初始化影像图层，防止覆盖矢量）
+const loadPlaceholderImage = async () => {
+  console.log('[loadPlaceholderImage] 加载透明占位影像')
+
+  // 设置一个空的影像 source（不显示任何内容）
+  // 关键：这确保影像图层已初始化，后续加载真实影像时不会覆盖矢量
+  const placeholderSource = new Static({
+    url: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=',  // 1x1 透明 PNG
+    crossOrigin: 'anonymous',
+    imageExtent: [-20037508.34, -20037508.34, 20037508.34, 20037508.34],  // 全球范围
+    projection: 'EPSG:3857'
+  })
+
+  imageLayer.value.setSource(placeholderSource)
+  imageLayer.value.setZIndex(1)
+  imageLayer.value.setVisible(false)  // 隐藏，不显示
+
+  console.log('[loadPlaceholderImage] 透明占位影像已加载')
+}
+
+// 加载基于标注范围的透明占位影像（后端创建真实文件）
+const loadPlaceholderImageForAnnotations = async (annotations) => {
+  console.log('[loadPlaceholderImageForAnnotations] 基于标注范围加载透明占位影像（后端创建）')
+
+  // 1. 计算所有标注的外接矩形
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity
+
+  annotations.forEach(ann => {
+    let geometry = ann.geometry
+    if (typeof geometry === 'string') {
+      geometry = JSON.parse(geometry)
+    }
+    const coords = geometry.coordinates
+
+    if (geometry.type === 'Point') {
+      minX = Math.min(minX, coords[0])
+      minY = Math.min(minY, coords[1])
+      maxX = Math.max(maxX, coords[0])
+      maxY = Math.max(maxY, coords[1])
+    } else if (geometry.type === 'LineString') {
+      coords.forEach(coord => {
+        minX = Math.min(minX, coord[0])
+        minY = Math.min(minY, coord[1])
+        maxX = Math.max(maxX, coord[0])
+        maxY = Math.max(maxY, coord[1])
+      })
+    } else if (geometry.type === 'Polygon' || geometry.type === 'Rectangle' || geometry.type === 'Circle') {
+      // Polygon 坐标是嵌套数组，取第一个环
+      const ring = coords[0]
+      ring.forEach(coord => {
+        minX = Math.min(minX, coord[0])
+        minY = Math.min(minY, coord[1])
+        maxX = Math.max(maxX, coord[0])
+        maxY = Math.max(maxY, coord[1])
+      })
+    }
+  })
+
+  // 添加 10% 的边距
+  const paddingX = (maxX - minX) * 0.1 || 1000
+  const paddingY = (maxY - minY) * 0.1 || 1000
+  const extent = [minX - paddingX, minY - paddingY, maxX + paddingX, maxY + paddingY]
+
+  console.log('[loadPlaceholderImageForAnnotations] 标注范围:', { minX, minY, maxX, maxY })
+  console.log('[loadPlaceholderImageForAnnotations] 扩展范围:', extent)
+
+  try {
+    // 2. 调用后端 API 创建透明占位影像
+    const token = localStorage.getItem('token')
+    const response = await fetch('/api/images/create-placeholder', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`
+      },
+      body: JSON.stringify({
+        minX: minX - paddingX,
+        minY: minY - paddingY,
+        maxX: maxX + paddingX,
+        maxY: maxY + paddingY,
+        projectId: currentProject.value?.id
+      })
+    })
+
+    const result = await response.json()
+
+    if (result.code !== 200) {
+      console.error('[loadPlaceholderImageForAnnotations] 创建占位影像失败:', result.message)
+      ElMessage.error('创建占位影像失败：' + (result.message || '未知错误'))
+      return
+    }
+
+    const placeholderImage = result.data
+    console.log('[loadPlaceholderImageForAnnotations] 占位影像创建成功:', placeholderImage)
+
+    // 关键修复：保存所有矢量要素（在移除图层之前）
+    console.log('[loadPlaceholderImageForAnnotations] 保存矢量要素，准备加载占位影像')
+    const features = vectorSource.getFeatures()
+    const featuresData = []
+    features.forEach(f => {
+      const geom = f.getGeometry()
+      featuresData.push({
+        geometry: geom.clone(),
+        properties: f.getProperties(),
+        style: f.getStyle()
+      })
+    })
+    console.log('[loadPlaceholderImageForAnnotations] 保存了', featuresData.length, '个矢量要素')
+
+    // 关键修复：先清空矢量图层，避免影像加载时覆盖
+    vectorSource.clear()
+    console.log('[loadPlaceholderImageForAnnotations] 矢量图层已清空')
+
+    // 3. 使用创建的占位影像加载地图
+    const newSource = new Static({
+      url: `${getImagePreviewUrl(placeholderImage.id)}?t=${new Date().getTime()}`,
+      crossOrigin: 'anonymous',
+      imageExtent: extent,
+      projection: 'EPSG:3857'
+    })
+
+    // 移除旧图层，创建新图层
+    const oldImageLayer = imageLayer.value
+    map.removeLayer(oldImageLayer)
+
+    const newImageLayer = new ImageLayer({
+      source: newSource,
+      visible: false  // 保持隐藏，仅用于初始化图层结构
+    })
+    map.addLayer(newImageLayer)
+    imageLayer.value = newImageLayer
+
+    console.log('[loadPlaceholderImageForAnnotations] 占位影像图层已重新创建')
+
+    // 关键修复：移除矢量图层，然后重新添加，确保它在最上面
+    map.removeLayer(vectorLayer)
+    map.addLayer(vectorLayer)
+
+    // 调试：检查图层顺序
+    const placeholderLayers = map.getLayers().getArray()
+    console.log('[loadPlaceholderImageForAnnotations] 当前图层顺序:', placeholderLayers.map((l, i) => `${i}: ${l.constructor.name}`))
+    console.log('[loadPlaceholderImageForAnnotations] 矢量图层已移动到最上层')
+
+    // 等待影像渲染完成后再添加矢量
+    await new Promise(resolve => setTimeout(resolve, 100))
+
+    // 重新添加所有矢量要素
+    console.log('[loadPlaceholderImageForAnnotations] 开始重新添加矢量要素')
+    featuresData.forEach(data => {
+      const feature = new Feature({
+        geomType: data.properties.geomType,
+        isSymbol: data.properties.isSymbol,
+        symbolId: data.properties.symbolId,
+        symbolName: data.properties.symbolName
+      })
+      feature.setGeometry(data.geometry)
+      if (data.style) {
+        feature.setStyle(data.style)
+      }
+      vectorSource.addFeature(feature)
+    })
+
+    console.log('[loadPlaceholderImageForAnnotations] 矢量要素已重新添加，共', vectorSource.getFeatures().length, '个')
+
+    // 4. 设置为当前影像
+    imageStore.setCurrentImage(placeholderImage)
+
+    // 5. 强制重绘
+    vectorLayer.changed()
+    map.renderSync()
+
+    console.log('[loadPlaceholderImageForAnnotations] 透明占位影像已加载，ID:', placeholderImage.id)
+    ElMessage.success('占位影像已加载')
+
+  } catch (error) {
+    console.error('[loadPlaceholderImageForAnnotations] 创建占位影像异常:', error)
+    ElMessage.error('创建占位影像失败：' + error.message)
+  }
+}
+
+// 加载底图影像（不重置调整参数，不清除当前影像）
+const loadBaseImage = async (imageId) => {
+  try {
+    console.log('[loadBaseImage] 开始加载底图影像:', imageId)
+    const res = await getImage(imageId)
+    if (res.code !== 200) {
+      ElMessage.error('加载底图影像失败')
+      return
+    }
+
+    const image = res.data
+    console.log('[loadBaseImage] 影像信息:', image)
+
+    // 计算影像范围
+    const extent = [
+      image.minX || 0, image.minY || 0,
+      image.maxX || 0, image.maxY || 0
+    ]
+
+    // 如果范围为 0，使用默认范围
+    if (extent[0] === 0 && extent[1] === 0 && extent[2] === 0 && extent[3] === 0) {
+      console.log('[loadBaseImage] 影像范围信息缺失，使用默认范围')
+    }
+
+    // 创建新的影像 source
+    const timestamp = new Date().getTime()
+    const newSource = new Static({
+      url: `${getImagePreviewUrl(image.id)}?t=${timestamp}`,
+      crossOrigin: 'anonymous',
+      imageExtent: extent,
+      projection: 'EPSG:3857'
+    })
+
+    // 移除旧影像图层
+    console.log('[loadBaseImage] 移除旧影像图层')
+    map.removeLayer(imageLayer.value)
+
+    // 关键修复：先移除矢量图层，等影像图层添加后再添加，确保渲染顺序正确
+    console.log('[loadBaseImage] 移除矢量图层，准备加载影像')
+    map.removeLayer(vectorLayer)
+
+    // 创建新的影像图层
+    const newImageLayer = new ImageLayer({
+      source: newSource,
+      visible: true,
+      zIndex: 1
+    })
+    map.addLayer(newImageLayer)
+    imageLayer.value = newImageLayer
+
+    console.log('[loadBaseImage] 影像图层已重新创建')
+
+    // 缩放到影像范围
+    if (extent[0] !== 0 || extent[1] !== 0 || extent[2] !== 0 || extent[3] !== 0) {
+      map.getView().fit(extent, { duration: 500, padding: [50, 50, 50, 50] })
+    }
+
+    // 关键修复：设置最高 zIndex 并添加矢量图层到最上层
+    vectorLayer.setZIndex(999)
+    map.addLayer(vectorLayer)
+
+    // 调试：检查图层顺序
+    const baseLayers = map.getLayers().getArray()
+    console.log('[loadBaseImage] 当前图层顺序:', baseLayers.map((l, i) => `${i}: ${l.constructor.name}`))
+    console.log('[loadBaseImage] 矢量图层已移动到最上层，zIndex=999')
+
+    // 关键修复：保存所有矢量要素，清空后重新添加，强制 OpenLayers 完全重绘
+    console.log('[loadBaseImage] 保存矢量要素，准备重绘')
+    const features = vectorSource.getFeatures()
+    const featuresData = []
+    features.forEach(f => {
+      const geom = f.getGeometry()
+      featuresData.push({
+        geometry: geom.clone(),
+        properties: f.getProperties(),
+        style: f.getStyle()
+      })
+    })
+
+    // 清空并重新添加
+    vectorSource.clear()
+    console.log('[loadBaseImage] 矢量图层已清空，重新添加', featuresData.length, '个要素')
+
+    // 等待影像渲染完成后再添加矢量
+    await new Promise(resolve => setTimeout(resolve, 100))
+
+    // 重新添加所有要素
+    featuresData.forEach(data => {
+      const feature = new Feature({
+        geomType: data.properties.geomType,
+        isSymbol: data.properties.isSymbol,
+        symbolId: data.properties.symbolId,
+        symbolName: data.properties.symbolName
+      })
+      feature.setGeometry(data.geometry)
+      if (data.style) {
+        feature.setStyle(data.style)
+      }
+      vectorSource.addFeature(feature)
+    })
+
+    console.log('[loadBaseImage] 矢量要素已重新添加')
+
+    // 强制重绘
+    vectorLayer.changed()
+    map.renderSync()
+
+    console.log('[loadBaseImage] 已强制重绘，矢量图层 zIndex=999')
+
+    // 设置为当前影像
+    imageStore.setCurrentImage(image)
+
+    console.log('[loadBaseImage] 底图影像加载完成')
+    ElMessage.success('底图影像加载成功')
+  } catch (error) {
+    console.error('加载底图影像失败:', error)
+    ElMessage.error('加载底图影像失败：' + error.message)
+  }
+}
+
+// 加载影像列表（用于对比功能）
+const loadImagesList = async () => {
+  try {
+    const res = await getImages()
+    if (res.code === 200) {
+      imageStore.setImages(res.data || [])
+    }
+  } catch (error) {
+    console.error('加载影像列表失败:', error)
+  }
+}
+
 onMounted(() => {
   initMap()
+  // 不再自动加载影像列表，改为在 MapTools 中需要时再加载
+  // loadImagesList()
 })
 
 onUnmounted(() => {
@@ -1828,6 +3021,15 @@ onUnmounted(() => {
   width: 100%;
   height: 100%;
   position: relative;
+}
+
+.map {
+  width: 100%;
+  height: 100%;
+}
+
+.map canvas {
+  cursor: inherit !important;
 }
 
 .toolbar {
@@ -1883,6 +3085,12 @@ onUnmounted(() => {
 
 .map canvas {
   cursor: inherit !important;
+}
+
+/* 确保矢量图层的 canvas 在最上层 */
+.map canvas.ol-vector-layer {
+  z-index: 100 !important;
+  position: relative !important;
 }
 
 .status-bar {
@@ -1947,5 +3155,40 @@ onUnmounted(() => {
 
 .context-menu-item.disabled:hover {
   background: transparent;
+}
+
+/* 双层地图架构样式 */
+.base-map {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 1;
+}
+
+.vector-map {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 2;
+  background: transparent !important;
+}
+
+/* 确保矢量地图的所有 canvas 背景透明 */
+.vector-map canvas {
+  background: transparent !important;
+}
+
+/* 确保矢量地图的图层容器也透明 */
+.vector-map .ol-layer {
+  background: transparent !important;
+}
+
+/* 矢量地图的交互点样式 */
+.vector-map .ol-pointer-event {
+  cursor: inherit;
 }
 </style>

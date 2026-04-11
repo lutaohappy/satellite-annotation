@@ -14,6 +14,8 @@ public class ProjectDTO {
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
     private Long annotationCount;  // 标注数量
+    private Long baseImageId;  // 底图影像 ID
+    private String baseImageName;  // 底图影像文件名
 
     public ProjectDTO() {}
 
@@ -26,6 +28,7 @@ public class ProjectDTO {
         this.createdAt = project.createdAt;
         this.updatedAt = project.updatedAt;
         this.annotationCount = project.annotationCount;
+        this.baseImageId = project.baseImageId;
     }
 
     public Long getId() { return id; }
@@ -44,4 +47,8 @@ public class ProjectDTO {
     public void setUpdatedAt(LocalDateTime updatedAt) { this.updatedAt = updatedAt; }
     public Long getAnnotationCount() { return annotationCount; }
     public void setAnnotationCount(Long annotationCount) { this.annotationCount = annotationCount; }
+    public Long getBaseImageId() { return baseImageId; }
+    public void setBaseImageId(Long baseImageId) { this.baseImageId = baseImageId; }
+    public String getBaseImageName() { return baseImageName; }
+    public void setBaseImageName(String baseImageName) { this.baseImageName = baseImageName; }
 }

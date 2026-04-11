@@ -102,16 +102,194 @@
           </div>
         </div>
       </el-tab-pane>
+
+      <!-- 影像管理 Tab -->
+      <el-tab-pane label="影像" name="image">
+        <div class="tab-content">
+          <!-- 创建占位图项目按钮 -->
+          <div class="batch-actions" style="margin-bottom: 12px;">
+            <el-button size="small" type="primary" @click="loadBatches">
+              <el-icon><Refresh /></el-icon> 刷新批次
+            </el-button>
+            <el-button size="small" type="success" @click="startCreatePlaceholderProject">
+              <el-icon><Plus /></el-icon> 创建占位图项目
+            </el-button>
+          </div>
+
+          <!-- 批次折叠面板 -->
+          <el-collapse v-model="activeBatchIds" class="batch-collapse" accordion>
+            <el-collapse-item
+              v-for="batch in batches"
+              :key="batch.batchUuid"
+              :title="formatBatchTitle(batch)"
+              :name="batch.batchUuid"
+            >
+              <template #title>
+                <div class="batch-title">
+                  <span v-if="editingBatchId === batch.batchUuid" class="batch-edit">
+                    <el-input
+                      v-model="editingBatchName"
+                      size="small"
+                      placeholder="输入批次名称"
+                      @keyup.enter="confirmBatchNameEdit(batch)"
+                      @blur="confirmBatchNameEdit(batch)"
+                    />
+                  </span>
+                  <span v-else class="batch-name">
+                    {{ batch.name || '未命名批次' }}
+                    <el-tag size="small" type="info" style="margin-left: 5px;">{{ batch.fileCount }} 个文件</el-tag>
+                  </span>
+                  <div class="batch-title-actions">
+                    <el-button
+                      link
+                      type="primary"
+                      size="small"
+                      @click.stop="startBatchNameEdit(batch)"
+                      title="重命名"
+                    >
+                      <el-icon><Edit /></el-icon>
+                    </el-button>
+                    <el-button
+                      link
+                      type="danger"
+                      size="small"
+                      @click.stop="confirmDeleteBatch(batch)"
+                      title="删除批次"
+                    >
+                      <el-icon><Delete /></el-icon>
+                    </el-button>
+                    <el-button
+                      link
+                      type="success"
+                      size="small"
+                      @click.stop="uploadToBatch(batch)"
+                      title="继续上传"
+                    >
+                      <el-icon><Upload /></el-icon>
+                    </el-button>
+                  </div>
+                </div>
+              </template>
+              <div class="batch-images">
+                <div
+                  v-for="img in getImagesForBatch(batch.batchUuid)"
+                  :key="img.id"
+                  class="image-item"
+                  :class="{ active: imageStore.currentImage?.id === img.id }"
+                  @click="selectImage(img)"
+                >
+                  <div class="image-info">
+                    <div class="image-name">{{ img.name }}</div>
+                    <div class="image-meta">
+                      <span>{{ img.width }}x{{ img.height }}</span>
+                      <span>{{ formatFileSize(img.fileSize) }}</span>
+                    </div>
+                  </div>
+                  <div class="image-actions">
+                    <el-button size="small" type="success" @click.stop="loadImage(img)">加载</el-button>
+                    <el-button size="small" type="danger" @click.stop="deleteImage(img.id)">删除</el-button>
+                  </div>
+                </div>
+              </div>
+              <div class="batch-actions">
+                <el-button size="small" @click.stop="loadAllBatchImages(batch.batchUuid)">全部加载</el-button>
+              </div>
+            </el-collapse-item>
+          </el-collapse>
+
+          <!-- 无批次时显示上传提示 -->
+          <div v-if="batches.length === 0 && !loadingImages" class="empty-tip">
+            暂无影像批次，请点击上传按钮添加
+          </div>
+
+          <!-- 上传按钮 -->
+          <div class="upload-section">
+            <el-button type="primary" size="small" :icon="Upload" @click="emit('open-upload')">
+              上传影像
+            </el-button>
+          </div>
+
+          <!-- 影像调整（如果有加载的影像） -->
+          <div v-if="imageStore.currentImage" class="image-adjustment-section">
+            <el-divider>影像调整</el-divider>
+
+            <!-- 当前影像信息 -->
+            <div class="current-image-info">
+              <el-icon><Picture /></el-icon>
+              <span class="image-name">{{ imageStore.currentImage.name }}</span>
+              <el-tag size="small" type="info">编辑中</el-tag>
+            </div>
+
+            <div class="adjustment-item">
+              <span class="label">亮度</span>
+              <el-slider v-model="adjustParams.brightness" :min="0" :max="2" :step="0.01" @input="applyAdjustment" />
+              <span class="value">{{ adjustParams.brightness.toFixed(2) }}</span>
+            </div>
+
+            <div class="adjustment-item">
+              <span class="label">对比度</span>
+              <el-slider v-model="adjustParams.contrast" :min="0" :max="2" :step="0.01" @input="applyAdjustment" />
+              <span class="value">{{ adjustParams.contrast.toFixed(2) }}</span>
+            </div>
+
+            <div class="adjustment-item">
+              <span class="label">Gamma</span>
+              <el-slider v-model="adjustParams.gamma" :min="0.1" :max="3" :step="0.01" @input="applyAdjustment" />
+              <span class="value">{{ adjustParams.gamma.toFixed(2) }}</span>
+            </div>
+
+            <div class="adjustment-item">
+              <span class="label">透明度</span>
+              <el-slider v-model="adjustParams.opacity" :min="0" :max="1" :step="0.01" @input="applyAdjustment" />
+              <span class="value">{{ adjustParams.opacity.toFixed(2) }}</span>
+            </div>
+
+            <div class="adjustment-actions">
+              <el-button size="small" @click="resetAdjustment">重置</el-button>
+              <el-button size="small" type="primary" @click="showSaveDialog = true">保存</el-button>
+              <el-button size="small" type="success" @click="emit('open-swipe')" :disabled="imageStore.images.length < 2">
+                对比
+              </el-button>
+            </div>
+          </div>
+
+          <!-- 保存对话框 -->
+          <el-dialog v-model="showSaveDialog" title="保存调整" width="400px">
+            <el-radio-group v-model="saveMode" style="width: 100%">
+              <el-radio value="overwrite" size="large" border style="width: 100%; margin-bottom: 10px;">
+                <div style="display: flex; flex-direction: column; gap: 4px;">
+                  <span style="font-weight: 500;">覆盖当前影像</span>
+                  <span style="font-size: 12px; color: #999;">保存调整参数到当前影像</span>
+                </div>
+              </el-radio>
+              <el-radio value="new" size="large" border style="width: 100%;">
+                <div style="display: flex; flex-direction: column; gap: 4px;">
+                  <span style="font-weight: 500;">另存为新影像</span>
+                  <span style="font-size: 12px; color: #999;">创建新的影像文件</span>
+                </div>
+              </el-radio>
+            </el-radio-group>
+            <el-input v-if="saveMode === 'new'" v-model="newImageName" placeholder="请输入新影像名称" style="margin-top: 15px;" />
+            <template #footer>
+              <el-button @click="showSaveDialog = false">取消</el-button>
+              <el-button type="primary" @click="saveAdjustment" :loading="saving">保存</el-button>
+            </template>
+          </el-dialog>
+        </div>
+      </el-tab-pane>
     </el-tabs>
   </div>
 </template>
 
 <script setup>
-import { ref, computed, watch } from 'vue'
-import { ElMessage } from 'element-plus'
-import { Upload, Close, Lock, Unlock } from '@element-plus/icons-vue'
+import { ref, computed, watch, onMounted } from 'vue'
+import { ElMessage, ElMessageBox } from 'element-plus'
+import { Upload, Close, Lock, Unlock, Refresh, Picture, Edit, Delete } from '@element-plus/icons-vue'
 import { getLength, getArea } from 'ol/sphere'
 import { transform } from 'ol/proj'
+import { useImageStore } from '@/stores/image'
+import { getImages, deleteImage as deleteImageApi } from '@/api/image'
+import { getBatches, getImagesByBatch, saveAdjustment as saveAdjustmentApi, saveAdjusted as saveAdjustedApi, deleteBatch, updateBatch } from '@/api/batch'
 
 const props = defineProps({
   map: Object,
@@ -120,12 +298,33 @@ const props = defineProps({
   selectedSymbol: Object
 })
 
-const emit = defineEmits(['measure-result', 'symbol-select', 'symbols-change', 'open-library'])
+const emit = defineEmits(['measure-result', 'symbol-select', 'symbols-change', 'open-library', 'open-upload', 'open-swipe', 'image-load', 'image-adjustment', 'create-project', 'create-placeholder-project'])
+
+const imageStore = useImageStore()
 
 const activeTab = ref('measure')
 const expanded = ref(true)
 const position = ref({ x: 10, y: 80 })
 const isLocked = ref(false) // 锁定状态
+
+// 影像相关
+const loadingImages = ref(false)
+const adjustParams = ref({
+  brightness: 1.0,
+  contrast: 1.0,
+  gamma: 1.0,
+  opacity: 1.0
+})
+
+// 保存对话框相关
+const showSaveDialog = ref(false)
+const saveMode = ref('overwrite')
+const newImageName = ref('')
+const saving = ref(false)
+
+// 批次编辑相关
+const editingBatchId = ref(null)
+const editingBatchName = ref('')
 
 // 切换锁定状态
 const toggleLock = () => {
@@ -351,8 +550,435 @@ watch(isDragging, (val) => {
   }
 })
 
+// ==================== 影像相关方法 ====================
+
+// 批次相关状态
+const batches = ref([])
+const activeBatchIds = ref([])
+const batchImages = ref({})
+
+// 加载批次列表
+const loadBatches = async () => {
+  loadingImages.value = true
+  try {
+    const res = await getBatches()
+    if (res.code === 200) {
+      batches.value = res.data || []
+      imageStore.setBatches(res.data || [])
+      // 加载每个批次的影像
+      for (const batch of batches.value) {
+        await loadBatchImages(batch.batchUuid)
+      }
+    }
+  } catch (error) {
+    ElMessage.error('加载批次列表失败')
+  } finally {
+    loadingImages.value = false
+  }
+}
+
+// 加载指定批次的影像
+const loadBatchImages = async (batchId) => {
+  try {
+    const res = await getImagesByBatch(batchId)
+    if (res.code === 200) {
+      batchImages.value[batchId] = res.data || []
+      imageStore.setImagesByBatch(batchId, res.data || [])
+    }
+  } catch (error) {
+    ElMessage.error('加载批次影像失败')
+  }
+}
+
+// 获取指定批次的影像
+const getImagesForBatch = (batchId) => {
+  return batchImages.value[batchId] || []
+}
+
+// 加载批次内所有影像
+const loadAllBatchImages = (batchId) => {
+  const images = getImagesForBatch(batchId)
+  if (images.length === 0) {
+    ElMessage.warning('该批次没有影像')
+    return
+  }
+  // 逐个加载影像
+  images.forEach((img, index) => {
+    setTimeout(() => {
+      emit('image-load', img)
+    }, index * 100)
+  })
+  ElMessage.success(`正在加载 ${images.length} 个影像`)
+}
+
+// 格式化批次标题
+const formatBatchTitle = (batch) => {
+  const date = new Date(batch.createdAt)
+  const dateStr = `${date.getMonth() + 1}/${date.getDate()} ${date.getHours()}:${date.getMinutes().toString().padStart(2, '0')}`
+  return `批次 ${dateStr} - ${batch.fileCount} 个文件`
+}
+
+// 加载影像列表（保留原有方法用于兼容）
+const loadImagesList = async () => {
+  loadingImages.value = true
+  try {
+    const res = await getImages()
+    if (res.code === 200) {
+      imageStore.setImages(res.data || [])
+    }
+  } catch (error) {
+    ElMessage.error('加载影像列表失败')
+  } finally {
+    loadingImages.value = false
+  }
+}
+
+// 选择影像
+const selectImage = (img) => {
+  console.log('[MapTools selectImage] 选择影像:', img)
+  imageStore.setCurrentImage(img)
+}
+
+// 加载影像到地图
+const loadImage = (img) => {
+  console.log('[MapTools loadImage] 加载影像:', img)
+  // 先设置当前影像，确保保存时能获取到
+  imageStore.setCurrentImage(img)
+  emit('image-load', img)
+}
+
+// 删除影像
+const deleteImage = async (id) => {
+  try {
+    await ElMessageBox.confirm('确定要删除该影像吗？', '提示', {
+      confirmButtonText: '确定',
+      cancelButtonText: '取消',
+      type: 'warning'
+    })
+
+    await deleteImageApi(id)
+    imageStore.removeImage(id)
+    ElMessage.success('删除成功')
+    // 刷新批次列表以更新文件数量
+    await loadBatches()
+    // 清除批次影像缓存，确保下次获取时是最新数据
+    batchImages.value = {}
+    // 如果删除的是当前影像，清除当前影像状态
+    if (imageStore.currentImage?.id === id) {
+      imageStore.setCurrentImage(null)
+      resetAdjustment()
+    }
+  } catch (error) {
+    if (error !== 'cancel') {
+      ElMessage.error('删除失败')
+    }
+  }
+}
+
+// 基于影像创建项目
+const createProjectWithImage = (img) => {
+  const nameInput = ref('')
+  const descInput = ref('')
+  const crsInput = ref('EPSG:3857')
+
+  ElMessageBox({
+    title: '新建项目',
+    message: h('div', { style: 'display: flex; flex-direction: column; gap: 12px; min-width: 300px' }, [
+      h('div', { style: 'display: flex; flex-direction: column; gap: 4px' }, [
+        h('label', { style: 'font-size: 14px; color: #606266' }, '项目名称'),
+        h('el-input', {
+          modelValue: nameInput.value,
+          'onUpdate:modelValue': (val) => { nameInput.value = val },
+          placeholder: '请输入项目名称'
+        })
+      ]),
+      h('div', { style: 'display: flex; flex-direction: column; gap: 4px' }, [
+        h('label', { style: 'font-size: 14px; color: #606266' }, '项目描述'),
+        h('el-input', {
+          modelValue: descInput.value,
+          'onUpdate:modelValue': (val) => { descInput.value = val },
+          type: 'textarea',
+          rows: 3,
+          placeholder: '请输入项目描述（可选）'
+        })
+      ]),
+      h('div', { style: 'display: flex; flex-direction: column; gap: 4px' }, [
+        h('label', { style: 'font-size: 14px; color: #606266' }, '坐标系'),
+        h('el-select', {
+          modelValue: crsInput.value,
+          'onUpdate:modelValue': (val) => { crsInput.value = val },
+          placeholder: '请选择坐标系',
+          style: 'width: 100%'
+        }, [
+          h('el-option', { label: 'WGS84 / Pseudo-Mercator (EPSG:3857)', value: 'EPSG:3857' }),
+          h('el-option', { label: 'WGS84 (EPSG:4326)', value: 'EPSG:4326' }),
+          h('el-option', { label: 'CGCS2000 (EPSG:4490)', value: 'EPSG:4490' })
+        ])
+      ])
+    ]),
+    showCancelButton: true,
+    confirmButtonText: '创建',
+    cancelButtonText: '取消',
+    customClass: 'project-create-dialog',
+    beforeClose: async (action, instance, done) => {
+      if (action === 'confirm') {
+        if (!nameInput.value || nameInput.value.trim() === '') {
+          ElMessage.warning('请输入项目名称')
+          return
+        }
+        try {
+          const token = localStorage.getItem('token')
+          const response = await fetch('/api/projects', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${token}`
+            },
+            body: JSON.stringify({
+              name: nameInput.value.trim(),
+              description: descInput.value?.trim() || '',
+              crs: crsInput.value
+            })
+          })
+          const result = await response.json()
+          if (result.code === 200) {
+            ElMessage.success('项目创建成功，正在加载影像...')
+            emit('create-project', {
+              ...result.data,
+              imageId: img.id
+            })
+            done()
+          } else {
+            ElMessage.error(result.message || '创建项目失败')
+          }
+        } catch (error) {
+          ElMessage.error('创建项目失败：' + error.message)
+        }
+      } else {
+        done()
+      }
+    }
+  })
+}
+
+// 开始创建占位图项目
+const startCreatePlaceholderProject = () => {
+  ElMessageBox.prompt('请输入项目名称', '创建占位图项目', {
+    confirmButtonText: '下一步',
+    cancelButtonText: '取消',
+    inputPlaceholder: '项目名称',
+    inputPattern: /.+/,
+    inputErrorMessage: '请输入项目名称'
+  }).then(async ({ value }) => {
+    try {
+      const token = localStorage.getItem('token')
+      const response = await fetch('/api/projects', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          name: value,
+          description: '',
+          crs: 'EPSG:3857',
+          method: 'draw'
+        })
+      })
+      const result = await response.json()
+      if (result.code === 200) {
+        ElMessage.success('请在地图上绘制矩形范围，双击完成')
+        emit('create-placeholder-project', result.data)
+      } else {
+        ElMessage.error(result.message || '创建项目失败')
+      }
+    } catch (error) {
+      ElMessage.error('创建项目失败：' + error.message)
+    }
+  }).catch(() => {})
+}
+
+// ==================== 批次管理方法 ====================
+
+// 开始编辑批次名称
+const startBatchNameEdit = (batch) => {
+  editingBatchId.value = batch.batchUuid
+  editingBatchName.value = batch.name || ''
+}
+
+// 确认编辑批次名称
+const confirmBatchNameEdit = async (batch) => {
+  if (editingBatchId.value !== batch.batchUuid) return
+
+  try {
+    const res = await updateBatch(batch.batchUuid, { name: editingBatchName.value })
+    if (res.code === 200) {
+      ElMessage.success('批次名称已更新')
+      // 更新本地批次数据
+      const batchIndex = batches.value.findIndex(b => b.batchUuid === batch.batchUuid)
+      if (batchIndex >= 0) {
+        batches.value[batchIndex].name = editingBatchName.value
+      }
+    } else {
+      ElMessage.error('更新失败：' + (res.message || '未知错误'))
+    }
+  } catch (error) {
+    ElMessage.error('更新失败：' + (error.message || '网络错误'))
+  } finally {
+    editingBatchId.value = null
+    editingBatchName.value = ''
+  }
+}
+
+// 确认删除批次
+const confirmDeleteBatch = async (batch) => {
+  try {
+    await ElMessageBox.confirm(
+      `确定要删除批次"${batch.name || '未命名'}"吗？这将删除该批次下的所有 ${batch.fileCount} 个影像文件，操作不可恢复！`,
+      '警告',
+      {
+        confirmButtonText: '确定删除',
+        cancelButtonText: '取消',
+        type: 'warning'
+      }
+    )
+
+    const res = await deleteBatch(batch.batchUuid)
+    if (res.code === 200) {
+      ElMessage.success('批次已删除')
+      // 从本地列表中移除
+      batches.value = batches.value.filter(b => b.batchUuid !== batch.batchUuid)
+      // 清除该批次的影像缓存
+      imageStore.clearBatchImages(batch.batchUuid)
+    } else {
+      ElMessage.error('删除失败：' + (res.message || '未知错误'))
+    }
+  } catch (error) {
+    if (error !== 'cancel') {
+      ElMessage.error('删除失败：' + (error.message || '网络错误'))
+    }
+  }
+}
+
+// 上传到指定批次
+const uploadToBatch = (batch) => {
+  // 打开通用上传对话框，传递批次信息
+  emit('open-upload', { batchUuid: batch.batchUuid, batchName: batch.name })
+}
+
+// 应用影像调整（实时预览）
+const applyAdjustment = () => {
+  emit('image-adjustment', adjustParams.value)
+}
+
+// 重置调整
+const resetAdjustment = () => {
+  adjustParams.value = {
+    brightness: 1.0,
+    contrast: 1.0,
+    gamma: 1.0,
+    opacity: 1.0
+  }
+  applyAdjustment()
+}
+
+// 保存调整
+const saveAdjustment = async () => {
+  if (!imageStore.currentImage) {
+    console.error('[saveAdjustment] 没有当前影像')
+    return
+  }
+
+  console.log('[saveAdjustment] 开始保存')
+  console.log('[saveAdjustment] 保存模式:', saveMode.value)
+  console.log('[saveAdjustment] 调整参数:', adjustParams.value)
+  console.log('[saveAdjustment] 当前影像:', imageStore.currentImage)
+
+  saving.value = true
+  try {
+    if (saveMode.value === 'overwrite') {
+      // 保存调整到当前影像（覆盖原文件）
+      console.log('[saveAdjustment] 调用 saveAdjustmentApi')
+      const res = await saveAdjustmentApi(imageStore.currentImage.id, {
+        brightness: adjustParams.value.brightness,
+        contrast: adjustParams.value.contrast,
+        gamma: adjustParams.value.gamma
+      })
+      console.log('[saveAdjustment] 保存响应:', res)
+      if (res.code === 200) {
+        ElMessage.success('影像已保存')
+        showSaveDialog.value = false
+        // 重置调整参数
+        resetAdjustment()
+        // 重新加载影像以显示调整后的效果
+        emit('image-load', imageStore.currentImage)
+      } else {
+        ElMessage.error('保存失败：' + (res.message || '未知错误'))
+      }
+    } else {
+      // 另存为新影像
+      const name = newImageName.value || `Adjusted_${imageStore.currentImage.name}`
+      console.log('[saveAdjustment] 另存为新影像:', name)
+      console.log('[saveAdjustment] 调用 saveAdjustedApi')
+      const res = await saveAdjustedApi(
+        imageStore.currentImage.id,
+        {
+          brightness: adjustParams.value.brightness,
+          contrast: adjustParams.value.contrast,
+          gamma: adjustParams.value.gamma,
+          newName: name
+        }
+      )
+      console.log('[saveAdjustment] 保存响应:', res)
+      if (res.code === 200) {
+        ElMessage.success('新影像已保存')
+        showSaveDialog.value = false
+        newImageName.value = ''
+        // 重置调整参数
+        resetAdjustment()
+        // 延迟刷新批次列表，确保数据库已提交
+        setTimeout(async () => {
+          console.log('[saveAdjustment] 开始刷新批次列表')
+          await loadBatches()
+          console.log('[saveAdjustment] 批次列表刷新完成')
+          // 刷新后再加载新影像
+          if (res.data && res.data.id) {
+            console.log('[saveAdjustment] 加载新影像:', res.data.id)
+            emit('image-load', res.data)
+          }
+        }, 500)
+      } else {
+        ElMessage.error('保存失败：' + (res.message || '未知错误'))
+      }
+    }
+  } catch (error) {
+    console.error('[saveAdjustment] 错误:', error)
+    ElMessage.error('保存失败：' + (error.message || '网络错误'))
+  } finally {
+    saving.value = false
+  }
+}
+
+// 格式化文件大小
+const formatFileSize = (bytes) => {
+  if (!bytes) return '0 B'
+  const k = 1024
+  const sizes = ['B', 'KB', 'MB', 'GB']
+  const i = Math.floor(Math.log(bytes) / Math.log(k))
+  return Math.round(bytes / Math.pow(k, i) * 100) / 100 + ' ' + sizes[i]
+}
+
+// 监听 tab 切换
+watch(activeTab, (newTab) => {
+  if (newTab === 'image') {
+    loadBatches()
+  }
+})
+
+// 暴露方法
 defineExpose({
-  handleDrawEvent
+  handleDrawEvent,
+  loadBatches
 })
 </script>
 
@@ -535,5 +1161,166 @@ defineExpose({
   margin-top: 12px;
   padding-top: 8px;
   border-top: 1px solid #eee;
+}
+
+/* 影像管理样式 */
+.image-list {
+  max-height: 200px;
+  overflow-y: auto;
+  margin-bottom: 12px;
+}
+
+.image-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px;
+  border-radius: 6px;
+  border: 2px solid transparent;
+  cursor: pointer;
+  transition: all 0.2s;
+  margin-bottom: 8px;
+  background: #f5f7fa;
+}
+
+.image-item:hover {
+  background: #ecf5ff;
+  border-color: #409eff;
+}
+
+.image-item.active {
+  background: #ecf5ff;
+  border-color: #409eff;
+}
+
+.image-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.image-name {
+  font-size: 14px;
+  color: #333;
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.image-meta {
+  font-size: 12px;
+  color: #999;
+  margin-top: 4px;
+  display: flex;
+  gap: 10px;
+}
+
+.image-actions {
+  display: flex;
+  gap: 6px;
+  margin-left: 10px;
+}
+
+.empty-tip {
+  text-align: center;
+  color: #999;
+  padding: 20px;
+  font-size: 14px;
+}
+
+.image-adjustment-section {
+  margin-top: 15px;
+  padding-top: 15px;
+  border-top: 1px solid #eee;
+}
+
+.adjustment-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 15px;
+}
+
+.adjustment-item .label {
+  width: 50px;
+  font-size: 14px;
+  color: #666;
+}
+
+.adjustment-item .value {
+  width: 50px;
+  text-align: right;
+  font-size: 14px;
+  color: #409eff;
+}
+
+.adjustment-item :deep(.el-slider) {
+  flex: 1;
+}
+
+.adjustment-item :deep(.el-slider__runway) {
+  height: 6px;
+}
+
+.adjustment-actions {
+  display: flex;
+  gap: 10px;
+  justify-content: flex-end;
+  margin-top: 15px;
+}
+
+/* 批次折叠面板样式 */
+.batch-collapse {
+  margin-bottom: 12px;
+}
+
+.batch-collapse :deep(.el-collapse-item__header) {
+  font-weight: 500;
+  font-size: 14px;
+  background: #f5f7fa;
+  padding: 10px 15px;
+}
+
+.batch-collapse :deep(.el-collapse-item__content) {
+  padding: 10px 15px;
+}
+
+.batch-images {
+  margin-bottom: 10px;
+}
+
+.batch-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding-top: 8px;
+  border-top: 1px solid #eee;
+}
+
+/* 批次标题样式 */
+.batch-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+}
+
+.batch-title-actions {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+}
+
+.batch-title-actions .el-button {
+  padding: 4px;
+  min-width: auto;
+}
+
+.batch-edit {
+  flex: 1;
+}
+
+.batch-edit :deep(.el-input) {
+  max-width: 200px;
 }
 </style>
