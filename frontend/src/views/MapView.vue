@@ -43,7 +43,18 @@
       <el-button @click="clearAll" type="danger">清除全部</el-button>
 
       <!-- 符号库编辑按钮 -->
-      <el-button @click="openSymbolLibrary">符号库编辑</el-button>
+      <el-button @click="openSymbolLibrary">符号库</el-button>
+
+      <el-divider direction="vertical" />
+
+      <!-- 货车分析功能 -->
+      <el-tooltip content="路网数据下载">
+        <el-button @click="showRoadNetworkDialog = true">路网下载</el-button>
+      </el-tooltip>
+
+      <el-tooltip content="货车通过性分析">
+        <el-button @click="showTruckAnalysisPanel = !showTruckAnalysisPanel">货车分析</el-button>
+      </el-tooltip>
 
       <el-divider direction="vertical" />
 
@@ -146,6 +157,31 @@
 
     <!-- 影像对比对话框 -->
     <ImageSwipe v-model="imageSwipeVisible" />
+
+    <!-- 路网下载对话框 -->
+    <el-dialog
+      v-model="showRoadNetworkDialog"
+      title="路网数据下载"
+      width="800px"
+      :close-on-click-modal="false"
+    >
+      <RoadNetworkDownloader
+        :map="map"
+        @draw-start="handleRoadNetworkDrawStart"
+        @draw-end="handleRoadNetworkDrawEnd"
+        @download-complete="handleRoadNetworkDownloadComplete"
+      />
+    </el-dialog>
+
+    <!-- 货车分析面板 -->
+    <TruckAnalysisPanel
+      v-if="showTruckAnalysisPanel"
+      :map="map"
+      @select-start="handleTruckSelectStart"
+      @select-end="handleTruckSelectEnd"
+      @show-route="handleShowRoute"
+      @locate-point="handleLocatePoint"
+    />
   </div>
 </template>
 
@@ -161,6 +197,8 @@ import SymbolEditDialog from '@/components/SymbolEditDialog.vue'
 import ProjectDialog from '@/components/ProjectDialog.vue'
 import ImageUpload from '@/components/ImageUpload.vue'
 import ImageSwipe from '@/components/ImageSwipe.vue'
+import RoadNetworkDownloader from '@/components/RoadNetworkDownloader.vue'
+import TruckAnalysisPanel from '@/components/TruckAnalysisPanel.vue'
 import Map from 'ol/Map'
 import View from 'ol/View'
 import TileLayer from 'ol/layer/Tile'
@@ -179,7 +217,7 @@ import { fromExtent } from 'ol/geom/Polygon'
 import { getImages, getImage, getImageFileUrl, getImagePreviewUrl, createPlaceholder } from '@/api/image'
 
 // 版本号（用于调试）
-const BUILD_VERSION = '20260410-29-影像列表新建项目表单'
+const BUILD_VERSION = '20260413-30-添加货车分析菜单'
 console.log('[MapView] 当前版本:', BUILD_VERSION)
 console.log('%c [Map] 当前版本:', 'background: #f00; color: #fff; font-size: 16px;', BUILD_VERSION)
 console.log('%c [Map] 双层地图架构：底层 (底图 + 影像) + 上层 (矢量标注)', 'background: #00f; color: #fff; font-size: 14px;')
@@ -212,6 +250,12 @@ const symbolEditDialogVisible = ref(false)
 
 // MapTools 引用
 const mapToolsRef = ref(null)
+
+// 货车分析相关
+const showRoadNetworkDialog = ref(false)
+const showTruckAnalysisPanel = ref(false)
+const truckAnalysisSelectMode = ref(null) // 'select-start' or 'select-end'
+let roadNetworkDrawInteraction = null
 
 // 项目管理相关
 const projectDialogVisible = ref(false)
@@ -431,7 +475,31 @@ const initMap = () => {
     contextMenuVisible.value = false
   })
 
+  // 货车分析选点处理
   map.on('click', (e) => {
+    // 选择起点
+    if (truckAnalysisSelectMode.value === 'select-start') {
+      const coord = e.coordinate
+      const lonLat = [coord[0], coord[1]]
+      if (truckAnalysisCallback) {
+        truckAnalysisCallback(coord[1], coord[0])
+      }
+      truckAnalysisSelectMode.value = null
+      ElMessage.success('起点已选择')
+      return
+    }
+
+    // 选择终点
+    if (truckAnalysisSelectMode.value === 'select-end') {
+      const coord = e.coordinate
+      if (truckAnalysisCallback) {
+        truckAnalysisCallback(coord[1], coord[0])
+      }
+      truckAnalysisSelectMode.value = null
+      ElMessage.success('终点已选择')
+      return
+    }
+
     if (editMode.value !== 'delete') return
 
     const clickedFeature = map.forEachFeatureAtPixel(e.pixel, (feature) => feature)
@@ -1132,6 +1200,19 @@ const setDrawType = (type, callback = null) => {
     console.log('[Draw] drawend 事件，版本:', BUILD_VERSION)
     console.log('[Draw] feature:', feature)
     console.log('[Draw] feature keys:', feature.getKeys())
+
+    // 路网区域绘制处理
+    if (truckAnalysisSelectMode.value === 'draw-area' && roadNetworkDrawCallback) {
+      const geom = feature.getGeometry()
+      if (geom) {
+        const extent = geom.getExtent()
+        // callback 接收 bbox [minLon, minLat, maxLon, maxLat]
+        roadNetworkDrawCallback([extent[0], extent[1], extent[2], extent[3]])
+      }
+      // 移除绘制的要素
+      vectorSource.removeFeature(feature)
+      return
+    }
 
     // 只有符号标注才设置样式，普通点线面使用默认样式
     if (selectedSymbol.value && drawType.value === 'Point' && !isMeasureMode.value) {
@@ -2404,6 +2485,71 @@ const handleImageUploaded = async (uploadResult) => {
     ElMessage.error('加载影像失败：' + error.message)
   }
 }
+
+// ==================== 路网下载相关处理函数 ====================
+
+// 开始绘制路网区域
+const handleRoadNetworkDrawStart = (callback) => {
+  truckAnalysisSelectMode.value = 'draw-area'
+  roadNetworkDrawCallback = callback
+
+  // 创建绘制交互（矩形框）
+  const extent = null
+  drawType.value = 'Rectangle'
+
+  ElMessage.info('请在地图上框选区域')
+}
+
+// 结束路网区域绘制
+const handleRoadNetworkDrawEnd = () => {
+  truckAnalysisSelectMode.value = null
+  if (draw.value) {
+    draw.value.removeInteraction?.()
+  }
+}
+
+// 路网下载完成
+const handleRoadNetworkDownloadComplete = (result) => {
+  ElMessage.success('路网数据下载成功')
+  showRoadNetworkDialog.value = false
+}
+
+// 货车分析 - 选择起点
+const handleTruckSelectStart = (callback) => {
+  truckAnalysisSelectMode.value = 'select-start'
+  truckAnalysisCallback = callback
+  ElMessage.info('请在地图上点击选择起点')
+}
+
+// 货车分析 - 选择终点
+const handleTruckSelectEnd = (callback) => {
+  truckAnalysisSelectMode.value = 'select-end'
+  truckAnalysisCallback = callback
+  ElMessage.info('请在地图上点击选择终点')
+}
+
+// 显示路线
+const handleShowRoute = (result) => {
+  if (result.routeGeoJson) {
+    // 在地图上显示路线 GeoJSON
+    console.log('[TruckAnalysis] Route:', result.routeGeoJson)
+    // TODO: 解析 GeoJSON 并添加到地图
+  }
+}
+
+// 定位禁行点
+const handleLocatePoint = (point) => {
+  if (map && point.lat && point.lon) {
+    map.getView().animate({
+      center: fromLonLat([point.lon, point.lat]),
+      zoom: 16,
+      duration: 500
+    })
+  }
+}
+
+let roadNetworkDrawCallback = null
+let truckAnalysisCallback = null
 
 // 处理影像加载
 const handleImageLoad = (image) => {
