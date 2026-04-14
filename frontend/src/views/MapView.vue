@@ -2528,19 +2528,17 @@ const handleRoadNetworkDrawStart = (callback) => {
   // 关闭对话框，让用户可以在地图上操作
   showRoadNetworkDialog.value = false
 
-  // 创建绘制交互（矩形框）
-  const extent = null
-  drawType.value = 'Rectangle'
+  // 创建矩形绘制交互
+  clearDraw() // 先清除之前的绘制工具
+  setDrawType('Rectangle')
 
-  ElMessage.info('请在地图上框选区域，完成后再次点击"在地图上框选区域"按钮')
+  ElMessage.info('请在地图上拖动鼠标框选区域，单击完成绘制')
 }
 
 // 结束路网区域绘制
 const handleRoadNetworkDrawEnd = () => {
   truckAnalysisSelectMode.value = null
-  if (draw.value) {
-    draw.value.removeInteraction?.()
-  }
+  clearDraw() // 清除绘制工具
 
   // 绘制完成后重新打开对话框
   showRoadNetworkDialog.value = true
