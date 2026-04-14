@@ -11,7 +11,48 @@
 
 ---
 
-## 二、部署步骤
+## 二、部署状态（已完成✅）
+
+### ✅ 数据库迁移
+- PostgreSQL 已安装并运行
+- PostGIS 扩展已启用
+- 表已创建：`road_networks`, `road_constraints`, `truck_analysis_requests`
+
+### ✅ OSRM 服务
+- Podman 已安装
+- OSRM 容器已启动：`osrm-truck`
+- 北京区域数据已处理：`/opt/osrm/data/beijing-latest.*`
+- 服务运行在端口 5000
+
+### ✅ 后端服务
+- 运行在端口 4000
+- 生产环境配置 (prod)
+
+### ✅ 前端服务
+- 已部署到 `/var/www/satellite-annotation/`
+- Nginx 已配置
+
+---
+
+## 三、验证命令
+
+```bash
+# 检查 OSRM 容器
+podman ps | grep osrm
+
+# 测试 OSRM API
+curl "http://localhost:5000/route/v1/driving/116.4,39.9;116.5,39.8?overview=false"
+
+# 检查后端服务
+ps aux | grep java
+
+# 测试后端 API (需要登录 token)
+curl -H "Authorization: Bearer YOUR_TOKEN" http://localhost:4000/api/road-networks
+```
+
+---
+
+## 四、原始部署步骤（供参考）
 
 ### 2.1 安装 Docker（如果未安装）
 
