@@ -165,8 +165,8 @@
       width="90%"
       top="5vh"
       :close-on-click-modal="false"
-      :modal="!isDrawingRoadNetwork"
       class="road-network-dialog"
+      append-to-body
     >
       <RoadNetworkDownloader
         :map="map"
@@ -2524,22 +2524,28 @@ const handleImageUploaded = async (uploadResult) => {
 const handleRoadNetworkDrawStart = (callback) => {
   truckAnalysisSelectMode.value = 'draw-area'
   roadNetworkDrawCallback = callback
-  isDrawingRoadNetwork.value = true // 绘制时隐藏遮罩层
+
+  // 关闭对话框，让用户可以在地图上操作
+  showRoadNetworkDialog.value = false
 
   // 创建绘制交互（矩形框）
   const extent = null
   drawType.value = 'Rectangle'
 
-  ElMessage.info('请在地图上框选区域')
+  ElMessage.info('请在地图上框选区域，完成后再次点击"在地图上框选区域"按钮')
 }
 
 // 结束路网区域绘制
 const handleRoadNetworkDrawEnd = () => {
   truckAnalysisSelectMode.value = null
-  isDrawingRoadNetwork.value = false // 恢复遮罩层
   if (draw.value) {
     draw.value.removeInteraction?.()
   }
+
+  // 绘制完成后重新打开对话框
+  showRoadNetworkDialog.value = true
+
+  ElMessage.success('区域已选择，请填写路网信息并下载')
 }
 
 // 路网下载完成
