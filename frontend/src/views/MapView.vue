@@ -165,6 +165,7 @@
       width="90%"
       top="5vh"
       :close-on-click-modal="false"
+      :modal="!isDrawingRoadNetwork"
       class="road-network-dialog"
     >
       <RoadNetworkDownloader
@@ -286,6 +287,7 @@ let roadNetworkDrawInteraction = null
 // 路网图层相关
 const roadNetworkLayers = ref([]) // 已下载的路网图层列表
 const allRoadNetworksVisible = ref(true) // 是否全部可见
+const isDrawingRoadNetwork = ref(false) // 是否正在绘制路网区域
 
 // 项目管理相关
 const projectDialogVisible = ref(false)
@@ -2522,6 +2524,7 @@ const handleImageUploaded = async (uploadResult) => {
 const handleRoadNetworkDrawStart = (callback) => {
   truckAnalysisSelectMode.value = 'draw-area'
   roadNetworkDrawCallback = callback
+  isDrawingRoadNetwork.value = true // 绘制时隐藏遮罩层
 
   // 创建绘制交互（矩形框）
   const extent = null
@@ -2533,6 +2536,7 @@ const handleRoadNetworkDrawStart = (callback) => {
 // 结束路网区域绘制
 const handleRoadNetworkDrawEnd = () => {
   truckAnalysisSelectMode.value = null
+  isDrawingRoadNetwork.value = false // 恢复遮罩层
   if (draw.value) {
     draw.value.removeInteraction?.()
   }
