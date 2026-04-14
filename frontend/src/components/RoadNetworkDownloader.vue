@@ -1,11 +1,5 @@
 <template>
-  <el-card class="road-network-downloader">
-    <template #header>
-      <div class="card-header">
-        <span>路网数据下载</span>
-      </div>
-    </template>
-
+  <div class="road-network-downloader">
     <el-form :model="form" label-width="100px" label-position="left">
       <!-- 路网名称 -->
       <el-form-item label="路网名称">
@@ -20,7 +14,7 @@
       <!-- 坐标范围 -->
       <el-form-item label="坐标范围" required>
         <el-alert
-          title="请在地图上绘制矩形区域"
+          title="请点击按钮后在地图上框选区域"
           type="info"
           :closable="false"
           show-icon
@@ -95,7 +89,7 @@
       <p class="progress-text">正在从 OpenStreetMap 下载路网数据...</p>
       <p class="progress-tip">提示：首次下载可能需要较长时间，请耐心等待</p>
     </div>
-  </el-card>
+  </div>
 </template>
 
 <script setup>
@@ -197,13 +191,7 @@ const resetForm = () => {
 
 <style scoped>
 .road-network-downloader {
-  margin-bottom: 20px;
-}
-
-.card-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
+  padding: 10px;
 }
 
 .coordinate-inputs {

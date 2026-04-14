@@ -158,12 +158,14 @@
     <!-- 影像对比对话框 -->
     <ImageSwipe v-model="imageSwipeVisible" />
 
-    <!-- 路网下载对话框 -->
+    <!-- 路网下载对话框 - 全屏模式 -->
     <el-dialog
       v-model="showRoadNetworkDialog"
       title="路网数据下载"
-      width="800px"
+      width="90%"
+      top="5vh"
       :close-on-click-modal="false"
+      class="road-network-dialog"
     >
       <RoadNetworkDownloader
         :map="map"
@@ -182,6 +184,30 @@
       @show-route="handleShowRoute"
       @locate-point="handleLocatePoint"
     />
+
+    <!-- 路网图层控制 -->
+    <div v-if="roadNetworkLayers.length > 0" class="road-network-layer-control">
+      <el-card class="layer-card" :body-style="{ padding: '10px' }">
+        <template #header>
+          <div class="card-header">
+            <span>路网图层</span>
+            <el-button link type="primary" size="small" @click="toggleAllRoadNetworks">
+              {{ allRoadNetworksVisible ? '全部隐藏' : '全部显示' }}
+            </el-button>
+          </div>
+        </template>
+        <div v-for="layer in roadNetworkLayers" :key="layer.id" class="layer-item">
+          <el-checkbox
+            v-model="layer.visible"
+            @change="toggleRoadNetworkLayer(layer)"
+            :label="layer.name"
+          />
+          <el-button link type="danger" size="small" @click="removeRoadNetworkLayer(layer)">
+            <el-icon><Close /></el-icon>
+          </el-button>
+        </div>
+      </el-card>
+    </div>
   </div>
 </template>
 
@@ -256,6 +282,10 @@ const showRoadNetworkDialog = ref(false)
 const showTruckAnalysisPanel = ref(false)
 const truckAnalysisSelectMode = ref(null) // 'select-start' or 'select-end'
 let roadNetworkDrawInteraction = null
+
+// 路网图层相关
+const roadNetworkLayers = ref([]) // 已下载的路网图层列表
+const allRoadNetworksVisible = ref(true) // 是否全部可见
 
 // 项目管理相关
 const projectDialogVisible = ref(false)
@@ -2512,6 +2542,35 @@ const handleRoadNetworkDrawEnd = () => {
 const handleRoadNetworkDownloadComplete = (result) => {
   ElMessage.success('路网数据下载成功')
   showRoadNetworkDialog.value = false
+
+  // 添加到图层列表
+  if (result && result.id) {
+    roadNetworkLayers.value.push({
+      id: result.id,
+      name: result.name || '路网 ' + result.id,
+      visible: true,
+      layer: null // 后续可关联实际的地图图层
+    })
+  }
+}
+
+// 切换单个路网图层可见性
+const toggleRoadNetworkLayer = (layer) => {
+  // TODO: 关联实际的地图图层显示/隐藏
+  console.log('[RoadNetwork] toggle layer:', layer.name, 'visible:', layer.visible)
+}
+
+// 切换所有路网图层可见性
+const toggleAllRoadNetworks = () => {
+  allRoadNetworksVisible.value = !allRoadNetworksVisible.value
+  roadNetworkLayers.value.forEach(layer => {
+    layer.visible = allRoadNetworksVisible.value
+  })
+}
+
+// 移除路网图层
+const removeRoadNetworkLayer = (layer) => {
+  roadNetworkLayers.value = roadNetworkLayers.value.filter(l => l.id !== layer.id)
 }
 
 // 货车分析 - 选择起点
@@ -3336,5 +3395,56 @@ onUnmounted(() => {
 /* 矢量地图的交互点样式 */
 .vector-map .ol-pointer-event {
   cursor: inherit;
+}
+
+/* 路网图层控制样式 */
+.road-network-layer-control {
+  position: absolute;
+  bottom: 50px;
+  left: 10px;
+  z-index: 1000;
+  width: 280px;
+}
+
+.layer-card {
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+.card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.layer-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 0;
+  border-bottom: 1px solid #eee;
+}
+
+.layer-item:last-child {
+  border-bottom: none;
+}
+
+.layer-item :deep(.el-checkbox__label) {
+  width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 路网下载对话框全屏样式 */
+.road-network-dialog :deep(.el-dialog__body) {
+  max-height: 70vh;
+  overflow-y: auto;
+}
+
+@media screen and (min-width: 1200px) {
+  .road-network-dialog {
+    width: 80%;
+  }
 }
 </style>
