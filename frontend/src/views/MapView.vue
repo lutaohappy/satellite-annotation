@@ -101,6 +101,10 @@
       @image-adjustment="handleImageAdjustment"
       @create-project="handleCreateProjectFromTool"
       @create-placeholder-project="handleCreatePlaceholderProject"
+      @open-road-network-download="showRoadNetworkDialog = true"
+      @road-network-toggle="toggleRoadNetworkVisibility"
+      @road-network-zoom="zoomToRoadNetwork"
+      @road-network-delete="loadRoadNetworks"
     />
 
     <!-- 状态栏 -->
@@ -187,24 +191,74 @@
     />
 
     <!-- 路网图层控制 -->
-    <div v-if="roadNetworkLayers.length > 0" class="road-network-layer-control">
+    <div v-if="roadNetworks.length > 0 || roadNetworkLayers.length > 0" class="road-network-layer-control">
       <el-card class="layer-card" :body-style="{ padding: '10px' }">
         <template #header>
           <div class="card-header">
-            <span>路网图层</span>
-            <el-button link type="primary" size="small" @click="toggleAllRoadNetworks">
-              {{ allRoadNetworksVisible ? '全部隐藏' : '全部显示' }}
+            <span>路网管理</span>
+            <el-button link type="primary" size="small" @click="loadRoadNetworks">
+              <el-icon><Refresh /></el-icon> 刷新
             </el-button>
           </div>
         </template>
-        <div v-for="layer in roadNetworkLayers" :key="layer.id" class="layer-item">
-          <el-checkbox
-            v-model="layer.visible"
-            @change="toggleRoadNetworkLayer(layer)"
-            :label="layer.name"
-          />
-          <el-button link type="danger" size="small" @click="removeRoadNetworkLayer(layer)">
-            <el-icon><Close /></el-icon>
+
+        <!-- 已下载路网列表 -->
+        <div class="section-title">已下载路网</div>
+        <div v-for="network in roadNetworks" :key="network.id" class="network-item">
+          <div class="network-info">
+            <el-checkbox
+              v-model="network.visible"
+              @change="toggleRoadNetworkVisibility(network)"
+              :label="network.name"
+            />
+            <el-tag size="small" type="info">{{ network.totalRoads }} 条道路</el-tag>
+          </div>
+          <div class="network-actions">
+            <el-button link type="primary" size="small" @click="zoomToRoadNetwork(network)" title="定位">
+              <el-icon><Location /></el-icon>
+            </el-button>
+            <el-button link type="danger" size="small" @click="deleteRoadNetwork(network.id)" title="删除">
+              <el-icon><Delete /></el-icon>
+            </el-button>
+          </div>
+        </div>
+        <div v-if="roadNetworks.length === 0" class="empty-tip">暂无路网，点击"路网下载"添加</div>
+
+        <!-- 通路分析功能 -->
+        <el-divider>通路分析</el-divider>
+        <div class="analysis-section">
+          <div class="point-selector">
+            <el-button
+              size="small"
+              :type="analysisSelectMode === 'start' ? 'success' : ''"
+              @click="selectAnalysisPoint('start')"
+            >
+              <el-icon><Location /></el-icon> 选择起点
+            </el-button>
+            <div v-if="analysisStartPoint" class="point-coord">
+              {{ analysisStartPoint.lon.toFixed(4) }}, {{ analysisStartPoint.lat.toFixed(4) }}
+            </div>
+          </div>
+          <div class="point-selector">
+            <el-button
+              size="small"
+              :type="analysisSelectMode === 'end' ? 'danger' : ''"
+              @click="selectAnalysisPoint('end')"
+            >
+              <el-icon><Location /></el-icon> 选择终点
+            </el-button>
+            <div v-if="analysisEndPoint" class="point-coord">
+              {{ analysisEndPoint.lon.toFixed(4) }}, {{ analysisEndPoint.lat.toFixed(4) }}
+            </div>
+          </div>
+          <el-button
+            type="primary"
+            size="small"
+            :disabled="!analysisStartPoint || !analysisEndPoint"
+            @click="performRouteAnalysis"
+            style="width: 100%; margin-top: 10px;"
+          >
+            开始通路分析
           </el-button>
         </div>
       </el-card>
@@ -234,7 +288,7 @@ import VectorLayer from 'ol/layer/Vector'
 import VectorSource from 'ol/source/Vector'
 import Static from 'ol/source/ImageStatic'
 import Feature from 'ol/Feature'
-import { fromLonLat } from 'ol/proj'
+import { fromLonLat, toLonLat } from 'ol/proj'
 import MousePosition from 'ol/control/MousePosition'
 import { Draw, Modify, Select, Translate } from 'ol/interaction'
 import XYZ from 'ol/source/XYZ'
@@ -242,6 +296,8 @@ import { Style, Icon, Stroke, Fill, Circle } from 'ol/style'
 import { Circle as CircleGeom, Polygon, Point, LineString } from 'ol/geom'
 import { fromExtent } from 'ol/geom/Polygon'
 import { getImages, getImage, getImageFileUrl, getImagePreviewUrl, createPlaceholder } from '@/api/image'
+import { getRoadNetworks, deleteRoadNetwork as deleteRoadNetworkApi } from '@/api/roadNetwork'
+import { Location, Delete, Refresh } from '@element-plus/icons-vue'
 
 // 版本号（用于调试）
 const BUILD_VERSION = '20260413-30-添加货车分析菜单'
@@ -285,9 +341,14 @@ const truckAnalysisSelectMode = ref(null) // 'select-start' or 'select-end'
 let roadNetworkDrawInteraction = null
 
 // 路网图层相关
-const roadNetworkLayers = ref([]) // 已下载的路网图层列表
-const allRoadNetworksVisible = ref(true) // 是否全部可见
+const roadNetworks = ref([]) // 已下载的路网列表
+const roadNetworkLayers = ref({}) // 路网图层映射 { id: layer }
 const isDrawingRoadNetwork = ref(false) // 是否正在绘制路网区域
+
+// 通路分析相关
+const analysisSelectMode = ref(null) // 'start' or 'end'
+const analysisStartPoint = ref(null)
+const analysisEndPoint = ref(null)
 
 // 项目管理相关
 const projectDialogVisible = ref(false)
@@ -509,7 +570,33 @@ const initMap = () => {
 
   // 货车分析选点处理
   map.on('click', (e) => {
-    // 选择起点
+    // 通路分析 - 选择起点
+    if (analysisSelectMode.value === 'start') {
+      const coord = e.coordinate
+      const lonLat = toLonLat(coord)
+      analysisStartPoint.value = {
+        lat: lonLat[1],
+        lon: lonLat[0]
+      }
+      analysisSelectMode.value = null
+      ElMessage.success('起点已选择')
+      return
+    }
+
+    // 通路分析 - 选择终点
+    if (analysisSelectMode.value === 'end') {
+      const coord = e.coordinate
+      const lonLat = toLonLat(coord)
+      analysisEndPoint.value = {
+        lat: lonLat[1],
+        lon: lonLat[0]
+      }
+      analysisSelectMode.value = null
+      ElMessage.success('终点已选择')
+      return
+    }
+
+    // 货车分析 - 选择起点
     if (truckAnalysisSelectMode.value === 'select-start') {
       const coord = e.coordinate
       const lonLat = [coord[0], coord[1]]
@@ -521,7 +608,7 @@ const initMap = () => {
       return
     }
 
-    // 选择终点
+    // 货车分析 - 选择终点
     if (truckAnalysisSelectMode.value === 'select-end') {
       const coord = e.coordinate
       if (truckAnalysisCallback) {
@@ -1238,11 +1325,19 @@ const setDrawType = (type, callback = null) => {
       const geom = feature.getGeometry()
       if (geom) {
         const extent = geom.getExtent()
+        // 将 EPSG:3857 坐标转换为 WGS84 经纬度
+        const minLonLat = toLonLat([extent[0], extent[1]])
+        const maxLonLat = toLonLat([extent[2], extent[3]])
         // callback 接收 bbox [minLon, minLat, maxLon, maxLat]
-        roadNetworkDrawCallback([extent[0], extent[1], extent[2], extent[3]])
+        roadNetworkDrawCallback([minLonLat[0], minLonLat[1], maxLonLat[0], maxLonLat[1]])
       }
       // 移除绘制的要素
       vectorSource.removeFeature(feature)
+      // 清除绘制工具
+      clearDraw()
+      // 重新打开对话框
+      showRoadNetworkDialog.value = true
+      ElMessage.success('区域已选择')
       return
     }
 
@@ -2538,12 +2633,6 @@ const handleRoadNetworkDrawStart = (callback) => {
 // 结束路网区域绘制
 const handleRoadNetworkDrawEnd = () => {
   truckAnalysisSelectMode.value = null
-  clearDraw() // 清除绘制工具
-
-  // 绘制完成后重新打开对话框
-  showRoadNetworkDialog.value = true
-
-  ElMessage.success('区域已选择，请填写路网信息并下载')
 }
 
 // 路网下载完成
@@ -2551,34 +2640,132 @@ const handleRoadNetworkDownloadComplete = (result) => {
   ElMessage.success('路网数据下载成功')
   showRoadNetworkDialog.value = false
 
-  // 添加到图层列表
-  if (result && result.id) {
-    roadNetworkLayers.value.push({
-      id: result.id,
-      name: result.name || '路网 ' + result.id,
-      visible: true,
-      layer: null // 后续可关联实际的地图图层
-    })
+  // 刷新路网列表
+  loadRoadNetworks()
+}
+
+// 加载路网列表
+const loadRoadNetworks = async () => {
+  try {
+    const res = await getRoadNetworks()
+    if (res.code === 200) {
+      roadNetworks.value = res.data.map(n => ({
+        ...n,
+        visible: false // 默认不显示
+      }))
+    }
+  } catch (error) {
+    console.error('加载路网列表失败:', error)
   }
 }
 
-// 切换单个路网图层可见性
-const toggleRoadNetworkLayer = (layer) => {
-  // TODO: 关联实际的地图图层显示/隐藏
-  console.log('[RoadNetwork] toggle layer:', layer.name, 'visible:', layer.visible)
+// 切换路网可见性
+const toggleRoadNetworkVisibility = async (network) => {
+  if (network.visible) {
+    // 显示路网
+    await loadRoadNetworkGeoJson(network.id)
+  } else {
+    // 隐藏路网
+    const layer = roadNetworkLayers.value[network.id]
+    if (layer && map) {
+      map.removeLayer(layer)
+      delete roadNetworkLayers.value[network.id]
+    }
+  }
 }
 
-// 切换所有路网图层可见性
-const toggleAllRoadNetworks = () => {
-  allRoadNetworksVisible.value = !allRoadNetworksVisible.value
-  roadNetworkLayers.value.forEach(layer => {
-    layer.visible = allRoadNetworksVisible.value
-  })
+// 加载路网 GeoJSON
+const loadRoadNetworkGeoJson = async (networkId) => {
+  try {
+    const token = localStorage.getItem('token')
+    const response = await fetch(`/api/road-networks/${networkId}/geojson`, {
+      headers: {
+        'Authorization': `Bearer ${token}`
+      }
+    })
+    const geojson = await response.json()
+
+    // 创建矢量图层
+    const source = new VectorSource({
+      features: new GeoJSON().readFeatures(geojson, {
+        featureProjection: 'EPSG:3857'
+      })
+    })
+
+    const layer = new VectorLayer({
+      source,
+      style: new Style({
+        stroke: new Stroke({
+          color: '#409eff',
+          width: 2
+        })
+      }),
+      zIndex: 10
+    })
+
+    map.addLayer(layer)
+    roadNetworkLayers.value[networkId] = layer
+  } catch (error) {
+    console.error('加载路网 GeoJSON 失败:', error)
+  }
 }
 
-// 移除路网图层
-const removeRoadNetworkLayer = (layer) => {
-  roadNetworkLayers.value = roadNetworkLayers.value.filter(l => l.id !== layer.id)
+// 定位到路网
+const zoomToRoadNetwork = (network) => {
+  if (!network.minLon || !network.maxLon) {
+    ElMessage.warning('路网范围信息缺失')
+    return
+  }
+  const extent = fromLonLat([network.minLon, network.minLat], 'EPSG:3857')
+    .concat(fromLonLat([network.maxLon, network.maxLat], 'EPSG:3857'))
+  map.getView().fit(extent, { duration: 500, padding: [50, 50, 50, 50] })
+}
+
+// 删除路网
+const deleteRoadNetwork = async (id) => {
+  try {
+    await ElMessageBox.confirm('确定要删除该路网吗？', '警告', {
+      confirmButtonText: '确定',
+      cancelButtonText: '取消',
+      type: 'warning'
+    })
+
+    await deleteRoadNetworkApi(id)
+    ElMessage.success('删除成功')
+
+    // 移除图层
+    const layer = roadNetworkLayers.value[id]
+    if (layer && map) {
+      map.removeLayer(layer)
+      delete roadNetworkLayers.value[id]
+    }
+
+    // 刷新列表
+    loadRoadNetworks()
+  } catch (error) {
+    if (error !== 'cancel') {
+      ElMessage.error('删除失败：' + error.message)
+    }
+  }
+}
+
+// 选择分析点
+const selectAnalysisPoint = (type) => {
+  analysisSelectMode.value = type
+  ElMessage.info(type === 'start' ? '请在地图上点击选择起点' : '请在地图上点击选择终点')
+}
+
+// 执行通路分析
+const performRouteAnalysis = () => {
+  if (!analysisStartPoint.value || !analysisEndPoint.value) {
+    ElMessage.warning('请选择起点和终点')
+    return
+  }
+
+  // TODO: 调用后端 API 进行通路分析
+  ElMessage.info('开始分析从起点到终点的通路...')
+  console.log('[Analysis] 起点:', analysisStartPoint.value)
+  console.log('[Analysis] 终点:', analysisEndPoint.value)
 }
 
 // 货车分析 - 选择起点
@@ -3218,6 +3405,8 @@ const loadImagesList = async () => {
 
 onMounted(() => {
   initMap()
+  // 加载路网列表
+  loadRoadNetworks()
   // 不再自动加载影像列表，改为在 MapTools 中需要时再加载
   // loadImagesList()
 })

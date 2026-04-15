@@ -20,7 +20,7 @@ import java.io.IOException;
 @Configuration
 public class WebConfig implements WebMvcConfigurer {
 
-    private static final String FRONTEND_DIST_PATH = "/Users/taolu/Downloads/test/satellite-annotation/frontend/dist/";
+    private static final String FRONTEND_DIST_PATH = "/opt/satellite-annotation/frontend/";
 
     @Override
     public void addResourceHandlers(ResourceHandlerRegistry registry) {

@@ -277,6 +277,38 @@
           </el-dialog>
         </div>
       </el-tab-pane>
+
+      <!-- 路网管理 Tab -->
+      <el-tab-pane label="路网" name="road-network">
+        <div class="tab-content">
+          <div class="road-network-section">
+            <el-button type="primary" size="small" @click="openRoadNetworkDownload" style="width: 100%; margin-bottom: 15px;">
+              <el-icon><Plus /></el-icon> 下载路网
+            </el-button>
+
+            <!-- 已下载路网列表 -->
+            <div v-if="roadNetworks.length > 0" class="road-network-list">
+              <div v-for="network in roadNetworks" :key="network.id" class="network-item">
+                <div class="network-info">
+                  <el-checkbox v-model="network.visible" @change="toggleRoadNetwork(network)" :label="network.name" />
+                  <el-tag size="small" type="info">{{ network.totalRoads }} 条道路</el-tag>
+                </div>
+                <div class="network-actions">
+                  <el-button link type="primary" size="small" @click="zoomToRoadNetwork(network)">
+                    <el-icon><Location /></el-icon>
+                  </el-button>
+                  <el-button link type="danger" size="small" @click="deleteRoadNetwork(network.id)">
+                    <el-icon><Delete /></el-icon>
+                  </el-button>
+                </div>
+              </div>
+            </div>
+            <div v-else class="empty-tip">
+              暂无路网，点击"下载路网"添加
+            </div>
+          </div>
+        </div>
+      </el-tab-pane>
     </el-tabs>
   </div>
 </template>
@@ -284,12 +316,13 @@
 <script setup>
 import { ref, computed, watch, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Upload, Close, Lock, Unlock, Refresh, Picture, Edit, Delete } from '@element-plus/icons-vue'
+import { Upload, Close, Lock, Unlock, Refresh, Picture, Edit, Delete, Plus, Location } from '@element-plus/icons-vue'
 import { getLength, getArea } from 'ol/sphere'
 import { transform } from 'ol/proj'
 import { useImageStore } from '@/stores/image'
 import { getImages, deleteImage as deleteImageApi } from '@/api/image'
 import { getBatches, getImagesByBatch, saveAdjustment as saveAdjustmentApi, saveAdjusted as saveAdjustedApi, deleteBatch, updateBatch } from '@/api/batch'
+import { getRoadNetworks, deleteRoadNetwork as deleteRoadNetworkApi } from '@/api/roadNetwork'
 
 const props = defineProps({
   map: Object,
@@ -298,14 +331,33 @@ const props = defineProps({
   selectedSymbol: Object
 })
 
-const emit = defineEmits(['measure-result', 'symbol-select', 'symbols-change', 'open-library', 'open-upload', 'open-swipe', 'image-load', 'image-adjustment', 'create-project', 'create-placeholder-project'])
+const emit = defineEmits([
+  'measure-result',
+  'symbol-select',
+  'symbols-change',
+  'open-library',
+  'open-upload',
+  'open-swipe',
+  'image-load',
+  'image-adjustment',
+  'create-project',
+  'create-placeholder-project',
+  'open-road-network-download',
+  'road-network-toggle',
+  'road-network-zoom',
+  'road-network-delete'
+])
 
 const imageStore = useImageStore()
 
 const activeTab = ref('measure')
 const expanded = ref(true)
 const position = ref({ x: 10, y: 80 })
-const isLocked = ref(false) // 锁定状态
+const isLocked = ref(false)
+
+// 路网相关
+const roadNetworks = ref([])
+const roadNetworkLayers = ref({})
 
 // 影像相关
 const loadingImages = ref(false)
@@ -972,8 +1024,61 @@ const formatFileSize = (bytes) => {
 watch(activeTab, (newTab) => {
   if (newTab === 'image') {
     loadBatches()
+  } else if (newTab === 'road-network') {
+    loadRoadNetworks()
   }
 })
+
+// ==================== 路网管理方法 ====================
+
+// 加载路网列表
+const loadRoadNetworks = async () => {
+  try {
+    const res = await getRoadNetworks()
+    if (res.code === 200) {
+      roadNetworks.value = (res.data || []).map(n => ({
+        ...n,
+        visible: false
+      }))
+    }
+  } catch (error) {
+    console.error('加载路网列表失败:', error)
+  }
+}
+
+// 打开路网下载对话框
+const openRoadNetworkDownload = () => {
+  emit('open-road-network-download')
+}
+
+// 切换路网显示
+const toggleRoadNetwork = async (network) => {
+  emit('road-network-toggle', network)
+}
+
+// 定位到路网
+const zoomToRoadNetwork = (network) => {
+  emit('road-network-zoom', network)
+}
+
+// 删除路网
+const deleteRoadNetwork = async (id) => {
+  try {
+    await ElMessageBox.confirm('确定要删除该路网吗？', '确认删除', {
+      confirmButtonText: '确定',
+      cancelButtonText: '取消',
+      type: 'warning'
+    })
+    await deleteRoadNetworkApi(id)
+    ElMessage.success('删除成功')
+    emit('road-network-delete', id)
+    loadRoadNetworks()
+  } catch (error) {
+    if (error !== 'cancel') {
+      ElMessage.error('删除失败：' + error.message)
+    }
+  }
+}
 
 // 暴露方法
 defineExpose({

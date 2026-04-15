@@ -3,6 +3,7 @@ package com.annotation.satelliteannotationbackend.controller;
 import com.annotation.satelliteannotationbackend.dto.ApiResponse;
 import com.annotation.satelliteannotationbackend.dto.DownloadNetworkRequest;
 import com.annotation.satelliteannotationbackend.dto.RoadNetworkDTO;
+import com.annotation.satelliteannotationbackend.dto.RoadNetworkTaskDTO;
 import com.annotation.satelliteannotationbackend.entity.User;
 import com.annotation.satelliteannotationbackend.security.JwtAuthenticationFilter;
 import com.annotation.satelliteannotationbackend.service.RoadNetworkService;
@@ -27,15 +28,21 @@ public class RoadNetworkController {
     }
 
     /**
-     * 下载指定区域的路网数据
+     * 下载指定区域的路网数据（异步任务模式）
+     * 创建下载任务，后台异步执行
      */
     @PostMapping("/download")
     public ResponseEntity<?> downloadNetwork(
             @RequestBody DownloadNetworkRequest request,
             @AuthenticationPrincipal User currentUser) {
         try {
-            RoadNetworkDTO result = networkService.downloadNetwork(request, currentUser);
-            return ResponseEntity.ok(ApiResponse.success(result));
+            // 创建任务
+            var task = networkService.createDownloadTask(request, currentUser);
+
+            // 异步执行任务
+            networkService.executeDownloadTask(task.getId());
+
+            return ResponseEntity.ok(ApiResponse.success(RoadNetworkTaskDTO.fromEntity(task)));
         } catch (Exception e) {
             return ResponseEntity.internalServerError()
                 .body(ApiResponse.error("下载路网数据失败：" + e.getMessage()));
@@ -94,5 +101,19 @@ public class RoadNetworkController {
             return ResponseEntity.internalServerError()
                 .body(ApiResponse.error("删除失败：" + e.getMessage()));
         }
+    }
+
+    /**
+     * 获取路网的 GeoJSON
+     */
+    @GetMapping("/{id}/geojson")
+    public ResponseEntity<?> getNetworkGeoJson(@PathVariable Long id) {
+        String geojson = networkService.findGeoJsonById(id);
+        if (geojson == null) {
+            return ResponseEntity.notFound().build();
+        }
+        return ResponseEntity.ok()
+            .header("Content-Type", "application/geo+json")
+            .body(geojson);
     }
 }

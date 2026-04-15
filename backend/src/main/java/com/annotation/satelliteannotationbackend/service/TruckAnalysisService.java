@@ -8,6 +8,7 @@ import com.annotation.satelliteannotationbackend.entity.User;
 import com.annotation.satelliteannotationbackend.repository.RoadConstraintRepository;
 import com.annotation.satelliteannotationbackend.repository.TruckAnalysisRepository;
 import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
@@ -169,13 +170,12 @@ public class TruckAnalysisService {
                 if (leg.steps != null) {
                     for (RouteStep step : leg.steps) {
                         // 获取路段中心点作为检查点
-                        List<List<Double>> geometry = step.geometry != null ?
-                            step.geometry.coordinates : null;
+                        List<List<Double>> geometryCoords = parseGeometryCoordinates(step.geometry);
 
-                        if (geometry != null && !geometry.isEmpty()) {
+                        if (geometryCoords != null && !geometryCoords.isEmpty()) {
                             // 取中间点作为代表
-                            int midIndex = geometry.size() / 2;
-                            List<Double> midPoint = geometry.get(midIndex);
+                            int midIndex = geometryCoords.size() / 2;
+                            List<Double> midPoint = geometryCoords.get(midIndex);
 
                             // 检查约束
                             // 注意：实际应用中需要从 step 中获取 OSM Way ID
@@ -246,10 +246,8 @@ public class TruckAnalysisService {
 
                         // 计算转弯角度和半径
                         Double turnRadius = calculateTurnRadiusFromSteps(step1, step2);
-                        if (turnRadius != null && turnRadius < minTurningRadius) {
-                            List<Double> turnPoint = step1.geometry != null &&
-                                !step1.geometry.coordinates.isEmpty() ?
-                                step1.geometry.coordinates.get(step1.geometry.coordinates.size() - 1) : null;
+                        if (minTurningRadius != null && turnRadius < minTurningRadius) {
+                            List<Double> turnPoint = getStepEndPoint(step1);
 
                             if (turnPoint != null) {
                                 violations.add(ViolationPointDTO.create(
@@ -297,6 +295,40 @@ public class TruckAnalysisService {
     }
 
     /**
+     * 解析 GeoJSON LineString 的坐标数组
+     */
+    private List<List<Double>> parseGeometryCoordinates(JsonNode geometryNode) {
+        if (geometryNode == null || !geometryNode.isArray()) {
+            return null;
+        }
+
+        List<List<Double>> coordinates = new ArrayList<>();
+        for (JsonNode coordNode : geometryNode) {
+            if (coordNode.isArray() && coordNode.size() >= 2) {
+                List<Double> coord = new ArrayList<>();
+                coord.add(coordNode.get(0).asDouble());
+                coord.add(coordNode.get(1).asDouble());
+                coordinates.add(coord);
+            }
+        }
+        return coordinates.isEmpty() ? null : coordinates;
+    }
+
+    /**
+     * 获取路段的终点坐标
+     */
+    private List<Double> getStepEndPoint(RouteStep step) {
+        if (step.geometry == null) {
+            return null;
+        }
+        List<List<Double>> coords = parseGeometryCoordinates(step.geometry);
+        if (coords == null || coords.isEmpty()) {
+            return null;
+        }
+        return coords.get(coords.size() - 1);
+    }
+
+    /**
      * 获取分析历史
      */
     public List<TruckAnalysisRequest> getHistory(Long userId) {
@@ -324,7 +356,7 @@ public class TruckAnalysisService {
     }
 
     public static class RouteStep {
-        public Object geometry;      // GeoJSON LineString
+        public JsonNode geometry;      // GeoJSON LineString
         public Double distance;
         public Double duration;
         public Double bearingBefore;
