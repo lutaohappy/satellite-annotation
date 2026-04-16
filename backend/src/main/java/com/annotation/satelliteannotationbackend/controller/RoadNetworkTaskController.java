@@ -34,6 +34,10 @@ public class RoadNetworkTaskController {
             @RequestBody DownloadNetworkRequest request,
             @AuthenticationPrincipal User currentUser) {
         try {
+            if (currentUser == null) {
+                return ResponseEntity.status(401)
+                    .body(ApiResponse.error("请先登录"));
+            }
             // 创建任务
             var task = networkService.createDownloadTask(request, currentUser);
 
@@ -53,6 +57,9 @@ public class RoadNetworkTaskController {
     @GetMapping
     public ResponseEntity<?> listTasks(@AuthenticationPrincipal User currentUser) {
         try {
+            if (currentUser == null) {
+                return ResponseEntity.ok(ApiResponse.success(List.of()));
+            }
             List<RoadNetworkTaskDTO> tasks = networkService.getUserTasks(currentUser.getId()).stream()
                 .map(RoadNetworkTaskDTO::fromEntity)
                 .collect(Collectors.toList());
