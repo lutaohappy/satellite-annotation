@@ -114,6 +114,7 @@
       <span>缩放级别：{{ zoomLevel }}</span>
       <el-divider direction="vertical" />
       <span v-if="statusMessage">{{ statusMessage }}</span>
+      <span class="version-info">{{ BUILD_VERSION }}</span>
     </div>
 
     <!-- 符号编辑对话框 -->
@@ -175,7 +176,6 @@
       <RoadNetworkDownloader
         :map="map"
         @draw-start="handleRoadNetworkDrawStart"
-        @draw-end="handleRoadNetworkDrawEnd"
         @download-complete="handleRoadNetworkDownloadComplete"
       />
     </el-dialog>
@@ -191,7 +191,7 @@
     />
 
     <!-- 路网图层控制 -->
-    <div v-if="roadNetworks.length > 0 || roadNetworkLayers.length > 0" class="road-network-layer-control">
+    <div v-if="roadNetworks.length > 0 || Object.keys(roadNetworkLayers).length > 0" class="road-network-layer-control">
       <el-card class="layer-card" :body-style="{ padding: '10px' }">
         <template #header>
           <div class="card-header">
@@ -267,7 +267,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted, onUnmounted, onBeforeUnmount } from 'vue'
+import { ref, watch, onMounted, onUnmounted, onBeforeUnmount } from 'vue'
 import { useRouter } from 'vue-router'
 import { useUserStore } from '@/stores/user'
 import { useImageStore } from '@/stores/image'
@@ -299,8 +299,8 @@ import { getImages, getImage, getImageFileUrl, getImagePreviewUrl, createPlaceho
 import { getRoadNetworks, deleteRoadNetwork as deleteRoadNetworkApi } from '@/api/roadNetwork'
 import { Location, Delete, Refresh } from '@element-plus/icons-vue'
 
-// 版本号（用于调试）
-const BUILD_VERSION = '20260413-30-添加货车分析菜单'
+// 版本号
+const BUILD_VERSION = 'v2.6 (20260416-32-路网下载任务列表)'
 console.log('[MapView] 当前版本:', BUILD_VERSION)
 console.log('%c [Map] 当前版本:', 'background: #f00; color: #fff; font-size: 16px;', BUILD_VERSION)
 console.log('%c [Map] 双层地图架构：底层 (底图 + 影像) + 上层 (矢量标注)', 'background: #00f; color: #fff; font-size: 14px;')
@@ -2630,11 +2630,6 @@ const handleRoadNetworkDrawStart = (callback) => {
   ElMessage.info('请在地图上拖动鼠标框选区域，单击完成绘制')
 }
 
-// 结束路网区域绘制
-const handleRoadNetworkDrawEnd = () => {
-  truckAnalysisSelectMode.value = null
-}
-
 // 路网下载完成
 const handleRoadNetworkDownloadComplete = (result) => {
   ElMessage.success('路网数据下载成功')
@@ -3505,6 +3500,17 @@ onUnmounted(() => {
   padding: 8px 15px;
   font-size: 12px;
   z-index: 1000;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  white-space: nowrap;
+}
+
+.version-info {
+  margin-left: auto;
+  opacity: 0.8;
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.9);
 }
 
 .mouse-position {
