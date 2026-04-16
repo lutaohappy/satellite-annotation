@@ -102,9 +102,6 @@
       @create-project="handleCreateProjectFromTool"
       @create-placeholder-project="handleCreatePlaceholderProject"
       @open-road-network-download="showRoadNetworkDialog = true"
-      @road-network-toggle="toggleRoadNetworkVisibility"
-      @road-network-zoom="zoomToRoadNetwork"
-      @road-network-delete="loadRoadNetworks"
     />
 
     <!-- 状态栏 -->
@@ -189,80 +186,6 @@
       @show-route="handleShowRoute"
       @locate-point="handleLocatePoint"
     />
-
-    <!-- 路网图层控制 -->
-    <div v-if="roadNetworks.length > 0 || Object.keys(roadNetworkLayers).length > 0" class="road-network-layer-control">
-      <el-card class="layer-card" :body-style="{ padding: '10px' }">
-        <template #header>
-          <div class="card-header">
-            <span>路网管理</span>
-            <el-button link type="primary" size="small" @click="loadRoadNetworks">
-              <el-icon><Refresh /></el-icon> 刷新
-            </el-button>
-          </div>
-        </template>
-
-        <!-- 已下载路网列表 -->
-        <div class="section-title">已下载路网</div>
-        <div v-for="network in roadNetworks" :key="network.id" class="network-item">
-          <div class="network-info">
-            <el-checkbox
-              v-model="network.visible"
-              @change="toggleRoadNetworkVisibility(network)"
-              :label="network.name"
-            />
-            <el-tag size="small" type="info">{{ network.totalRoads }} 条道路</el-tag>
-          </div>
-          <div class="network-actions">
-            <el-button link type="primary" size="small" @click="zoomToRoadNetwork(network)" title="定位">
-              <el-icon><Location /></el-icon>
-            </el-button>
-            <el-button link type="danger" size="small" @click="deleteRoadNetwork(network.id)" title="删除">
-              <el-icon><Delete /></el-icon>
-            </el-button>
-          </div>
-        </div>
-        <div v-if="roadNetworks.length === 0" class="empty-tip">暂无路网，点击"路网下载"添加</div>
-
-        <!-- 通路分析功能 -->
-        <el-divider>通路分析</el-divider>
-        <div class="analysis-section">
-          <div class="point-selector">
-            <el-button
-              size="small"
-              :type="analysisSelectMode === 'start' ? 'success' : ''"
-              @click="selectAnalysisPoint('start')"
-            >
-              <el-icon><Location /></el-icon> 选择起点
-            </el-button>
-            <div v-if="analysisStartPoint" class="point-coord">
-              {{ analysisStartPoint.lon.toFixed(4) }}, {{ analysisStartPoint.lat.toFixed(4) }}
-            </div>
-          </div>
-          <div class="point-selector">
-            <el-button
-              size="small"
-              :type="analysisSelectMode === 'end' ? 'danger' : ''"
-              @click="selectAnalysisPoint('end')"
-            >
-              <el-icon><Location /></el-icon> 选择终点
-            </el-button>
-            <div v-if="analysisEndPoint" class="point-coord">
-              {{ analysisEndPoint.lon.toFixed(4) }}, {{ analysisEndPoint.lat.toFixed(4) }}
-            </div>
-          </div>
-          <el-button
-            type="primary"
-            size="small"
-            :disabled="!analysisStartPoint || !analysisEndPoint"
-            @click="performRouteAnalysis"
-            style="width: 100%; margin-top: 10px;"
-          >
-            开始通路分析
-          </el-button>
-        </div>
-      </el-card>
-    </div>
   </div>
 </template>
 
@@ -296,7 +219,7 @@ import { Style, Icon, Stroke, Fill, Circle } from 'ol/style'
 import { Circle as CircleGeom, Polygon, Point, LineString } from 'ol/geom'
 import { fromExtent } from 'ol/geom/Polygon'
 import { getImages, getImage, getImageFileUrl, getImagePreviewUrl, createPlaceholder } from '@/api/image'
-import { getRoadNetworks, deleteRoadNetwork as deleteRoadNetworkApi } from '@/api/roadNetwork'
+import { getRoadNetworks } from '@/api/roadNetwork'
 import { Location, Delete, Refresh } from '@element-plus/icons-vue'
 
 // 版本号
@@ -342,13 +265,6 @@ let roadNetworkDrawInteraction = null
 
 // 路网图层相关
 const roadNetworks = ref([]) // 已下载的路网列表
-const roadNetworkLayers = ref({}) // 路网图层映射 { id: layer }
-const isDrawingRoadNetwork = ref(false) // 是否正在绘制路网区域
-
-// 通路分析相关
-const analysisSelectMode = ref(null) // 'start' or 'end'
-const analysisStartPoint = ref(null)
-const analysisEndPoint = ref(null)
 
 // 项目管理相关
 const projectDialogVisible = ref(false)
@@ -570,32 +486,6 @@ const initMap = () => {
 
   // 货车分析选点处理
   map.on('click', (e) => {
-    // 通路分析 - 选择起点
-    if (analysisSelectMode.value === 'start') {
-      const coord = e.coordinate
-      const lonLat = toLonLat(coord)
-      analysisStartPoint.value = {
-        lat: lonLat[1],
-        lon: lonLat[0]
-      }
-      analysisSelectMode.value = null
-      ElMessage.success('起点已选择')
-      return
-    }
-
-    // 通路分析 - 选择终点
-    if (analysisSelectMode.value === 'end') {
-      const coord = e.coordinate
-      const lonLat = toLonLat(coord)
-      analysisEndPoint.value = {
-        lat: lonLat[1],
-        lon: lonLat[0]
-      }
-      analysisSelectMode.value = null
-      ElMessage.success('终点已选择')
-      return
-    }
-
     // 货车分析 - 选择起点
     if (truckAnalysisSelectMode.value === 'select-start') {
       const coord = e.coordinate
@@ -2654,115 +2544,6 @@ const loadRoadNetworks = async () => {
   }
 }
 
-// 切换路网可见性
-const toggleRoadNetworkVisibility = async (network) => {
-  if (network.visible) {
-    // 显示路网
-    await loadRoadNetworkGeoJson(network.id)
-  } else {
-    // 隐藏路网
-    const layer = roadNetworkLayers.value[network.id]
-    if (layer && map) {
-      map.removeLayer(layer)
-      delete roadNetworkLayers.value[network.id]
-    }
-  }
-}
-
-// 加载路网 GeoJSON
-const loadRoadNetworkGeoJson = async (networkId) => {
-  try {
-    const token = localStorage.getItem('token')
-    const response = await fetch(`/api/road-networks/${networkId}/geojson`, {
-      headers: {
-        'Authorization': `Bearer ${token}`
-      }
-    })
-    const geojson = await response.json()
-
-    // 创建矢量图层
-    const source = new VectorSource({
-      features: new GeoJSON().readFeatures(geojson, {
-        featureProjection: 'EPSG:3857'
-      })
-    })
-
-    const layer = new VectorLayer({
-      source,
-      style: new Style({
-        stroke: new Stroke({
-          color: '#409eff',
-          width: 2
-        })
-      }),
-      zIndex: 10
-    })
-
-    map.addLayer(layer)
-    roadNetworkLayers.value[networkId] = layer
-  } catch (error) {
-    console.error('加载路网 GeoJSON 失败:', error)
-  }
-}
-
-// 定位到路网
-const zoomToRoadNetwork = (network) => {
-  if (!network.minLon || !network.maxLon) {
-    ElMessage.warning('路网范围信息缺失')
-    return
-  }
-  const extent = fromLonLat([network.minLon, network.minLat], 'EPSG:3857')
-    .concat(fromLonLat([network.maxLon, network.maxLat], 'EPSG:3857'))
-  map.getView().fit(extent, { duration: 500, padding: [50, 50, 50, 50] })
-}
-
-// 删除路网
-const deleteRoadNetwork = async (id) => {
-  try {
-    await ElMessageBox.confirm('确定要删除该路网吗？', '警告', {
-      confirmButtonText: '确定',
-      cancelButtonText: '取消',
-      type: 'warning'
-    })
-
-    await deleteRoadNetworkApi(id)
-    ElMessage.success('删除成功')
-
-    // 移除图层
-    const layer = roadNetworkLayers.value[id]
-    if (layer && map) {
-      map.removeLayer(layer)
-      delete roadNetworkLayers.value[id]
-    }
-
-    // 刷新列表
-    loadRoadNetworks()
-  } catch (error) {
-    if (error !== 'cancel') {
-      ElMessage.error('删除失败：' + error.message)
-    }
-  }
-}
-
-// 选择分析点
-const selectAnalysisPoint = (type) => {
-  analysisSelectMode.value = type
-  ElMessage.info(type === 'start' ? '请在地图上点击选择起点' : '请在地图上点击选择终点')
-}
-
-// 执行通路分析
-const performRouteAnalysis = () => {
-  if (!analysisStartPoint.value || !analysisEndPoint.value) {
-    ElMessage.warning('请选择起点和终点')
-    return
-  }
-
-  // TODO: 调用后端 API 进行通路分析
-  ElMessage.info('开始分析从起点到终点的通路...')
-  console.log('[Analysis] 起点:', analysisStartPoint.value)
-  console.log('[Analysis] 终点:', analysisEndPoint.value)
-}
-
 // 货车分析 - 选择起点
 const handleTruckSelectStart = (callback) => {
   truckAnalysisSelectMode.value = 'select-start'
@@ -3598,45 +3379,6 @@ onUnmounted(() => {
 /* 矢量地图的交互点样式 */
 .vector-map .ol-pointer-event {
   cursor: inherit;
-}
-
-/* 路网图层控制样式 */
-.road-network-layer-control {
-  position: absolute;
-  bottom: 50px;
-  left: 10px;
-  z-index: 1000;
-  width: 280px;
-}
-
-.layer-card {
-  max-height: 300px;
-  overflow-y: auto;
-}
-
-.card-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-
-.layer-item {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 8px 0;
-  border-bottom: 1px solid #eee;
-}
-
-.layer-item:last-child {
-  border-bottom: none;
-}
-
-.layer-item :deep(.el-checkbox__label) {
-  width: 100%;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 /* 路网下载对话框全屏样式 */

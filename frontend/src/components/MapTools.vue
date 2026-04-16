@@ -318,11 +318,15 @@ import { ref, computed, watch, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Upload, Close, Lock, Unlock, Refresh, Picture, Edit, Delete, Plus, Location } from '@element-plus/icons-vue'
 import { getLength, getArea } from 'ol/sphere'
-import { transform } from 'ol/proj'
+import { transform, fromLonLat } from 'ol/proj'
 import { useImageStore } from '@/stores/image'
 import { getImages, deleteImage as deleteImageApi } from '@/api/image'
 import { getBatches, getImagesByBatch, saveAdjustment as saveAdjustmentApi, saveAdjusted as saveAdjustedApi, deleteBatch, updateBatch } from '@/api/batch'
 import { getRoadNetworks, deleteRoadNetwork as deleteRoadNetworkApi } from '@/api/roadNetwork'
+import VectorSource from 'ol/source/Vector'
+import VectorLayer from 'ol/layer/Vector'
+import GeoJSON from 'ol/format/GeoJSON'
+import { Style, Stroke } from 'ol/style'
 
 const props = defineProps({
   map: Object,
@@ -343,8 +347,6 @@ const emit = defineEmits([
   'create-project',
   'create-placeholder-project',
   'open-road-network-download',
-  'road-network-toggle',
-  'road-network-zoom',
   'road-network-delete'
 ])
 
@@ -1051,14 +1053,72 @@ const openRoadNetworkDownload = () => {
   emit('open-road-network-download')
 }
 
+// 路网图层管理
+
 // 切换路网显示
 const toggleRoadNetwork = async (network) => {
-  emit('road-network-toggle', network)
+  if (network.visible) {
+    // 显示路网
+    await loadRoadNetworkGeoJson(network.id)
+  } else {
+    // 隐藏路网
+    const layer = roadNetworkLayers.value[network.id]
+    if (layer && props.map) {
+      props.map.removeLayer(layer)
+      delete roadNetworkLayers.value[network.id]
+    }
+  }
+}
+
+// 加载路网 GeoJSON
+const loadRoadNetworkGeoJson = async (networkId) => {
+  if (roadNetworkLayers.value[networkId]) {
+    return // 已经加载
+  }
+
+  try {
+    const token = localStorage.getItem('token')
+    const response = await fetch(`/api/road-networks/${networkId}/geojson`, {
+      headers: {
+        'Authorization': `Bearer ${token}`
+      }
+    })
+    const geojson = await response.json()
+
+    // 创建矢量图层
+    const source = new VectorSource({
+      features: new GeoJSON().readFeatures(geojson, {
+        featureProjection: 'EPSG:3857'
+      })
+    })
+
+    const layer = new VectorLayer({
+      source,
+      style: new Style({
+        stroke: new Stroke({
+          color: '#409eff',
+          width: 2
+        })
+      }),
+      zIndex: 10
+    })
+
+    props.map.addLayer(layer)
+    roadNetworkLayers.value[networkId] = layer
+  } catch (error) {
+    console.error('加载路网 GeoJSON 失败:', error)
+  }
 }
 
 // 定位到路网
 const zoomToRoadNetwork = (network) => {
-  emit('road-network-zoom', network)
+  if (!network.minLon || !network.maxLon) {
+    ElMessage.warning('路网范围信息缺失')
+    return
+  }
+  const extent = fromLonLat([network.minLon, network.minLat], 'EPSG:3857')
+    .concat(fromLonLat([network.maxLon, network.maxLat], 'EPSG:3857'))
+  props.map.getView().fit(extent, { duration: 500, padding: [50, 50, 50, 50] })
 }
 
 // 删除路网
@@ -1071,7 +1131,15 @@ const deleteRoadNetwork = async (id) => {
     })
     await deleteRoadNetworkApi(id)
     ElMessage.success('删除成功')
-    emit('road-network-delete', id)
+
+    // 移除图层
+    const layer = roadNetworkLayers.value[id]
+    if (layer && props.map) {
+      props.map.removeLayer(layer)
+      delete roadNetworkLayers.value[id]
+    }
+
+    // 刷新列表
     loadRoadNetworks()
   } catch (error) {
     if (error !== 'cancel') {
