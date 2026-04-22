@@ -282,15 +282,24 @@
       <el-tab-pane label="路网" name="road-network">
         <div class="tab-content">
           <div class="road-network-section">
-            <el-button type="primary" size="small" @click="openRoadNetworkDownload" style="width: 100%; margin-bottom: 15px;">
-              <el-icon><Plus /></el-icon> 下载路网
-            </el-button>
+            <div class="road-network-header">
+              <el-button type="primary" size="small" @click="openRoadNetworkDownload" style="flex: 1;">
+                <el-icon><Plus /></el-icon> 下载路网
+              </el-button>
+              <el-button type="info" size="small" @click="loadRoadNetworks" style="margin-left: 8px;">
+                <el-icon><Refresh /></el-icon>
+              </el-button>
+            </div>
 
             <!-- 已下载路网列表 -->
             <div v-if="roadNetworks.length > 0" class="road-network-list">
               <div v-for="network in roadNetworks" :key="network.id" class="network-item">
                 <div class="network-info">
-                  <el-checkbox v-model="network.visible" @change="toggleRoadNetwork(network)" :label="network.name" />
+                  <el-checkbox
+                    :model-value="network.visible"
+                    @update:model-value="(val) => { network.visible = val; toggleRoadNetwork(network, val); }"
+                    :label="network.name"
+                  />
                   <el-tag size="small" type="info">{{ network.totalRoads }} 条道路</el-tag>
                 </div>
                 <div class="network-actions">
@@ -309,6 +318,186 @@
           </div>
         </div>
       </el-tab-pane>
+
+      <!-- 货车分析 Tab -->
+      <el-tab-pane label="货车分析" name="truck-analysis">
+        <div class="tab-content">
+          <div class="truck-analysis-section">
+            <!-- 操作按钮 -->
+            <div class="analysis-actions">
+              <el-button type="primary" size="small" @click="startSelectPoints" :disabled="selectMode">
+                <el-icon><Location /></el-icon> 打点选择起点终点
+              </el-button>
+              <el-button type="success" size="small" @click="showSavedList" :disabled="!hasAnalysisRecords">
+                <el-icon><Folder /></el-icon> 查看历史
+              </el-button>
+              <el-button size="small" @click="clearAnalysis" :disabled="!hasAnalysisRecords">
+                <el-icon><Delete /></el-icon> 清空记录
+              </el-button>
+            </div>
+
+            <!-- 货车参数 -->
+            <el-divider>货车参数</el-divider>
+            <el-form label-width="70px" label-position="left" size="small">
+              <el-row :gutter="10">
+                <el-col :span="12">
+                  <el-form-item label="车长 (m)">
+                    <el-input-number v-model="truckParams.length" :min="0" :max="100" :precision="2" :step="0.5" style="width: 100%" />
+                  </el-form-item>
+                </el-col>
+                <el-col :span="12">
+                  <el-form-item label="车宽 (m)">
+                    <el-input-number v-model="truckParams.width" :min="0" :max="10" :precision="2" :step="0.1" style="width: 100%" />
+                  </el-form-item>
+                </el-col>
+              </el-row>
+              <el-row :gutter="10">
+                <el-col :span="12">
+                  <el-form-item label="车高 (m)">
+                    <el-input-number v-model="truckParams.height" :min="0" :max="10" :precision="2" :step="0.1" style="width: 100%" />
+                  </el-form-item>
+                </el-col>
+                <el-col :span="12">
+                  <el-form-item label="总重 (吨)">
+                    <el-input-number v-model="truckParams.weight" :min="0" :max="500" :precision="2" :step="1" style="width: 100%" />
+                  </el-form-item>
+                </el-col>
+              </el-row>
+              <el-form-item label="轴距 (m)">
+                <el-input-number v-model="truckParams.wheelbase" :min="0" :max="50" :precision="2" :step="0.5" style="width: 100%" />
+                <div class="form-tip">最小转弯半径：{{ minTurningRadius.toFixed(1) }}m (公式：R = L / sin(35°))</div>
+              </el-form-item>
+            </el-form>
+
+            <!-- 状态提示 -->
+            <el-alert
+              v-if="selectMode"
+              title="请在地图上点击选择起点，然后再选择终点"
+              type="info"
+              :closable="false"
+              show-icon
+              style="margin: 10px 0"
+            />
+
+            <!-- 分析记录列表 -->
+            <div v-if="analysisRecords.length > 0" class="analysis-list">
+              <div v-for="record in analysisRecords" :key="record.id" class="analysis-record">
+                <div class="record-header">
+                  <span class="record-name">记录 #{{ record.id }}</span>
+                  <el-tag :type="record.status === 'analyzed' ? 'success' : 'info'" size="small">
+                    {{ record.status === 'analyzed' ? '已分析' : '待分析' }}
+                  </el-tag>
+                </div>
+                <div class="record-points">
+                  <div class="point-item">
+                    <el-icon><CirclePlus /></el-icon> 起点：{{ record.startPoint || '未选择' }}
+                  </div>
+                  <div class="point-item">
+                    <el-icon><CirclePlus /></el-icon> 终点：{{ record.endPoint || '未选择' }}
+                  </div>
+                </div>
+                <div class="record-actions">
+                  <el-button
+                    v-if="record.startLat && record.startLon && record.endLat && record.endLon && record.status !== 'analyzed'"
+                    type="primary"
+                    size="small"
+                    @click="analyzeRoute(record)"
+                    :loading="record.analyzing"
+                  >
+                    计算分析
+                  </el-button>
+                  <el-button
+                    v-if="record.status === 'analyzed'"
+                    :type="record.visible ? 'warning' : 'success'"
+                    size="small"
+                    @click="toggleResult(record)"
+                  >
+                    {{ record.visible ? '隐藏' : '显示' }}
+                  </el-button>
+                  <el-button
+                    v-if="record.status === 'analyzed'"
+                    type="primary"
+                    size="small"
+                    @click="analyzeRoute(record)"
+                    :loading="record.analyzing"
+                  >
+                    重算
+                  </el-button>
+                  <el-button
+                    type="danger"
+                    size="small"
+                    @click="deleteRecord(record.id)"
+                  >
+                    删除
+                  </el-button>
+                </div>
+              </div>
+            </div>
+            <div v-else class="empty-tip">
+              暂无分析记录，请点击"打点选择起点终点"添加
+            </div>
+
+            <!-- 查看历史对话框 -->
+            <el-dialog v-model="showHistoryDialog" title="分析历史" width="700px">
+              <el-table :data="analysisHistory" style="width: 100%" max-height="400" v-loading="loadingHistory">
+                <el-table-column prop="requestName" label="名称" />
+                <el-table-column prop="startPoint" label="起点" width="100" />
+                <el-table-column prop="endPoint" label="终点" width="100" />
+                <el-table-column label="结果" width="80">
+                  <template #default="scope">
+                    <el-tag :type="scope.row.isPassable ? 'success' : 'danger'" size="small">
+                      {{ scope.row.isPassable ? '可通过' : '禁行' }}
+                    </el-tag>
+                  </template>
+                </el-table-column>
+                <el-table-column prop="createdAt" label="时间" width="160" />
+                <el-table-column label="操作" width="120" fixed="right">
+                  <template #default="scope">
+                    <el-button
+                      type="primary"
+                      size="small"
+                      @click="loadHistoryResult(scope.row)"
+                    >
+                      加载
+                    </el-button>
+                  </template>
+                </el-table-column>
+              </el-table>
+            </el-dialog>
+
+            <!-- 已保存列表对话框 -->
+            <el-dialog v-model="showSavedListDialog" title="已保存的分析" width="700px">
+              <el-button type="primary" size="small" @click="loadSavedList" style="margin-bottom: 10px">
+                <el-icon><Refresh /></el-icon> 刷新列表
+              </el-button>
+              <el-table :data="savedAnalysisList" style="width: 100%" max-height="400" v-loading="loadingSaved">
+                <el-table-column prop="name" label="名称" />
+                <el-table-column prop="startPoint" label="起点" width="100" />
+                <el-table-column prop="endPoint" label="终点" width="100" />
+                <el-table-column prop="createdAt" label="保存时间" width="160" />
+                <el-table-column label="操作" width="180" fixed="right">
+                  <template #default="scope">
+                    <el-button
+                      type="primary"
+                      size="small"
+                      @click="loadSavedResult(scope.row)"
+                    >
+                      加载
+                    </el-button>
+                    <el-button
+                      type="danger"
+                      size="small"
+                      @click="deleteSaved(scope.row.id)"
+                    >
+                      删除
+                    </el-button>
+                  </template>
+                </el-table-column>
+              </el-table>
+            </el-dialog>
+          </div>
+        </div>
+      </el-tab-pane>
     </el-tabs>
   </div>
 </template>
@@ -316,17 +505,20 @@
 <script setup>
 import { ref, computed, watch, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Upload, Close, Lock, Unlock, Refresh, Picture, Edit, Delete, Plus, Location } from '@element-plus/icons-vue'
+import { Upload, Close, Lock, Unlock, Refresh, Picture, Edit, Delete, Plus, Location, CirclePlus, Folder } from '@element-plus/icons-vue'
 import { getLength, getArea } from 'ol/sphere'
 import { transform, fromLonLat } from 'ol/proj'
 import { useImageStore } from '@/stores/image'
 import { getImages, deleteImage as deleteImageApi } from '@/api/image'
 import { getBatches, getImagesByBatch, saveAdjustment as saveAdjustmentApi, saveAdjusted as saveAdjustedApi, deleteBatch, updateBatch } from '@/api/batch'
 import { getRoadNetworks, deleteRoadNetwork as deleteRoadNetworkApi } from '@/api/roadNetwork'
+import { analyzeTruck, getAnalysisHistory, saveAnalysisRecord, getSavedAnalysisList } from '@/api/truckAnalysis'
 import VectorSource from 'ol/source/Vector'
 import VectorLayer from 'ol/layer/Vector'
 import GeoJSON from 'ol/format/GeoJSON'
-import { Style, Stroke } from 'ol/style'
+import { Style, Stroke, Fill, Circle, Text } from 'ol/style'
+import Feature from 'ol/Feature'
+import Point from 'ol/geom/Point'
 
 const props = defineProps({
   map: Object,
@@ -347,7 +539,10 @@ const emit = defineEmits([
   'create-project',
   'create-placeholder-project',
   'open-road-network-download',
-  'road-network-delete'
+  'road-network-delete',
+  'truck-analysis-select',
+  'truck-analysis-locate',
+  'truck-analysis-hide'
 ])
 
 const imageStore = useImageStore()
@@ -360,6 +555,34 @@ const isLocked = ref(false)
 // 路网相关
 const roadNetworks = ref([])
 const roadNetworkLayers = ref({})
+
+// 货车分析相关
+const analysisRecords = ref([])
+const selectMode = ref(false)
+const selectPointCallback = ref(null)
+const currentRecordId = ref(null)
+let truckAnalysisPointsLayer = null
+const truckParams = ref({
+  length: 15,
+  width: 2.5,
+  height: 3.5,
+  weight: 20,
+  wheelbase: 8
+})
+
+// 历史分析相关
+const showHistoryDialog = ref(false)
+const showSavedListDialog = ref(false)
+const analysisHistory = ref([])
+const savedAnalysisList = ref([])
+const loadingHistory = ref(false)
+const loadingSaved = ref(false)
+
+const minTurningRadius = computed(() => {
+  return truckParams.value.wheelbase / 0.574
+})
+
+const hasAnalysisRecords = computed(() => analysisRecords.value.length > 0)
 
 // 影像相关
 const loadingImages = ref(false)
@@ -398,6 +621,7 @@ const resultTitle = computed(() => {
   if (measureMode.value === 'coordinate') return '坐标'
   return ''
 })
+
 
 const clearMeasure = () => {
   measureResult.value = ''
@@ -1056,17 +1280,44 @@ const openRoadNetworkDownload = () => {
 // 路网图层管理
 
 // 切换路网显示
-const toggleRoadNetwork = async (network) => {
-  if (network.visible) {
+const toggleRoadNetwork = async (network, checked) => {
+  console.log('[toggleRoadNetwork] network:', network.name, 'checked:', checked)
+  if (checked) {
     // 显示路网
+    console.log('[toggleRoadNetwork] 加载路网:', network.id)
     await loadRoadNetworkGeoJson(network.id)
   } else {
-    // 隐藏路网
-    const layer = roadNetworkLayers.value[network.id]
-    if (layer && props.map) {
-      props.map.removeLayer(layer)
-      delete roadNetworkLayers.value[network.id]
+    // 隐藏路网 - 直接从地图图层列表中查找并移除
+    console.log('[toggleRoadNetwork] 移除路网:', network.id)
+
+    // 先尝试从缓存中移除
+    const cachedLayer = roadNetworkLayers.value[network.id]
+    if (cachedLayer && props.map) {
+      const layers = props.map.getLayers().getArray()
+      if (layers.includes(cachedLayer)) {
+        props.map.removeLayer(cachedLayer)
+        console.log('[toggleRoadNetwork] 从缓存移除图层成功')
+        delete roadNetworkLayers.value[network.id]
+        return
+      }
     }
+
+    // 如果缓存中没有或不在地图上，遍历地图所有图层查找
+    if (props.map) {
+      const layers = props.map.getLayers().getArray()
+      for (const layer of layers) {
+        if (layer.get('roadNetworkId') === network.id) {
+          props.map.removeLayer(layer)
+          console.log('[toggleRoadNetwork] 从地图查找并移除图层成功')
+          delete roadNetworkLayers.value[network.id]
+          return
+        }
+      }
+    }
+
+    // 都没找到，清除缓存
+    delete roadNetworkLayers.value[network.id]
+    console.log('[toggleRoadNetwork] 未找到图层，已清除缓存')
   }
 }
 
@@ -1083,6 +1334,20 @@ const loadRoadNetworkGeoJson = async (networkId) => {
         'Authorization': `Bearer ${token}`
       }
     })
+
+    if (!response.ok) {
+      if (response.status === 404) {
+        ElMessage.warning(`路网 ${networkId} 暂无 GeoJSON 数据`)
+      } else if (response.status === 401) {
+        ElMessage.error('登录已过期，请重新登录')
+        localStorage.removeItem('token')
+        window.location.href = '/gis/login'
+      } else {
+        ElMessage.error(`加载路网失败：${response.status}`)
+      }
+      return
+    }
+
     const geojson = await response.json()
 
     // 创建矢量图层
@@ -1102,11 +1367,20 @@ const loadRoadNetworkGeoJson = async (networkId) => {
       }),
       zIndex: 10
     })
+    // 设置标识，便于后续查找
+    layer.set('roadNetworkId', networkId)
 
     props.map.addLayer(layer)
     roadNetworkLayers.value[networkId] = layer
+
+    // 自动缩放到路网范围
+    const extent = source.getExtent()
+    if (extent && extent[0] !== Infinity) {
+      props.map.getView().fit(extent, { duration: 500, padding: [50, 50, 50, 50], maxZoom: 16 })
+    }
   } catch (error) {
     console.error('加载路网 GeoJSON 失败:', error)
+    ElMessage.error('加载路网失败：' + error.message)
   }
 }
 
@@ -1148,10 +1422,335 @@ const deleteRoadNetwork = async (id) => {
   }
 }
 
+// ==================== 货车分析方法 ====================
+
+// 开始选择起点终点
+const startSelectPoints = () => {
+  if (!props.map) {
+    ElMessage.warning('地图未初始化')
+    return
+  }
+
+  selectMode.value = true
+
+  // 创建新记录
+  const newRecord = {
+    id: Date.now(),
+    startLat: null,
+    startLon: null,
+    startPoint: '',
+    endLat: null,
+    endLon: null,
+    endPoint: '',
+    status: 'pending',
+    analyzing: false,
+    result: null,
+    visible: false
+  }
+  analysisRecords.value.push(newRecord)
+  currentRecordId.value = newRecord.id
+
+  ElMessage.info('请在地图上点击选择起点')
+
+  // 通知父组件进入选点模式
+  emit('truck-analysis-select', (lat, lon, type) => {
+    handlePointSelected(lat, lon, type)
+  })
+}
+
+// 处理选点
+const handlePointSelected = (lat, lon, type) => {
+  const record = analysisRecords.value.find(r => r.id === currentRecordId.value)
+  if (!record) return
+
+  if (type === 'start') {
+    record.startLat = lat
+    record.startLon = lon
+    record.startPoint = `${lat.toFixed(4)}, ${lon.toFixed(4)}`
+    ElMessage.success('起点已选择，请选择终点')
+    showTruckAnalysisPoint(lat, lon, 'start')
+  } else if (type === 'end') {
+    record.endLat = lat
+    record.endLon = lon
+    record.endPoint = `${lat.toFixed(4)}, ${lon.toFixed(4)}`
+    ElMessage.success('终点已选择，请点击"计算分析"')
+    selectMode.value = false
+    currentRecordId.value = null
+    showTruckAnalysisPoint(lat, lon, 'end')
+  }
+}
+
+// 在地图上显示起点/终点标记
+const showTruckAnalysisPoint = (lat, lon, type) => {
+  if (!props.map) return
+
+  if (!truckAnalysisPointsLayer) {
+    const source = new VectorSource()
+    truckAnalysisPointsLayer = new VectorLayer({
+      source,
+      zIndex: 999
+    })
+    props.map.addLayer(truckAnalysisPointsLayer)
+  }
+
+  const source = truckAnalysisPointsLayer.getSource()
+  const coordinate = fromLonLat([lon, lat])
+
+  const feature = new Feature({
+    geometry: new Point(coordinate),
+    pointType: type
+  })
+
+  const color = type === 'start' ? '#67c23a' : '#f56c6c'
+  const labelText = type === 'start' ? 'S' : 'E'
+
+  const style = new Style({
+    image: new Circle({
+      radius: 6,
+      fill: new Fill({ color }),
+      stroke: new Stroke({ color: '#fff', width: 1 })
+    }),
+    text: new Text({
+      text: labelText,
+      font: 'bold 14px Arial',
+      fill: new Fill({ color: '#fff' }),
+      stroke: new Stroke({ color: '#000', width: 2 }),
+      offsetY: -2
+    })
+  })
+
+  feature.setStyle(style)
+  source.addFeature(feature)
+}
+
+// 清除起点终点标记
+const clearTruckAnalysisPoints = () => {
+  if (truckAnalysisPointsLayer && props.map) {
+    props.map.removeLayer(truckAnalysisPointsLayer)
+    truckAnalysisPointsLayer = null
+  }
+}
+
+// 计算分析
+const analyzeRoute = async (record) => {
+  if (!record.startLat || !record.startLon || !record.endLat || !record.endLon) {
+    ElMessage.warning('请选择起点和终点')
+    return
+  }
+
+  try {
+    record.analyzing = true
+
+    const params = {
+      requestName: `记录 #${record.id}: ${record.startPoint} -> ${record.endPoint}`,
+      startLat: record.startLat,
+      startLon: record.startLon,
+      endLat: record.endLat,
+      endLon: record.endLon,
+      truck: {
+        length: truckParams.value.length,
+        width: truckParams.value.width,
+        height: truckParams.value.height,
+        weight: truckParams.value.weight,
+        axleWeight: truckParams.value.weight / 2,
+        wheelbase: truckParams.value.wheelbase
+      }
+    }
+
+    const result = await analyzeTruck(params)
+
+    record.status = 'analyzed'
+    record.result = result
+    ElMessage.success('分析完成')
+
+    // 通知父组件显示结果
+    emit('truck-analysis-locate', result)
+
+  } catch (error) {
+    ElMessage.error('分析失败：' + error.message)
+  } finally {
+    record.analyzing = false
+  }
+}
+
+// 切换结果显示/隐藏
+const toggleResult = (record) => {
+  if (record.result) {
+    record.visible = !record.visible
+    if (record.visible) {
+      emit('truck-analysis-locate', record.result)
+      ElMessage.success('已在地图上显示路线')
+    } else {
+      emit('truck-analysis-hide')
+      ElMessage.info('已隐藏路线')
+    }
+  }
+}
+
+// 删除记录
+const deleteRecord = (id) => {
+  const index = analysisRecords.value.findIndex(r => r.id === id)
+  if (index !== -1) {
+    analysisRecords.value.splice(index, 1)
+    ElMessage.success('记录已删除')
+  }
+}
+
+// 清空所有记录
+const clearAnalysis = () => {
+  analysisRecords.value = []
+  clearTruckAnalysisPoints()
+  ElMessage.success('已清空所有记录')
+}
+
+// ==================== 历史分析方法 ====================
+
+// 显示历史列表
+const showHistory = async () => {
+  showHistoryDialog.value = true
+  loadingHistory.value = true
+  try {
+    const result = await getAnalysisHistory()
+    analysisHistory.value = result || []
+  } catch (error) {
+    console.error('[MapTools] 加载历史失败:', error)
+    ElMessage.error('加载历史失败：' + error.message)
+  } finally {
+    loadingHistory.value = false
+  }
+}
+
+// 显示已保存列表
+const showSavedList = async () => {
+  showSavedListDialog.value = true
+  await loadSavedList()
+}
+
+// 加载已保存列表
+const loadSavedList = async () => {
+  loadingSaved.value = true
+  try {
+    const result = await getSavedAnalysisList()
+    savedAnalysisList.value = (result.data || result) || []
+  } catch (error) {
+    console.error('[MapTools] 加载列表失败:', error)
+    ElMessage.error('加载列表失败：' + error.message)
+  } finally {
+    loadingSaved.value = false
+  }
+}
+
+// 加载历史结果
+const loadHistoryResult = (record) => {
+  // 解析禁行点和转弯点
+  let violations = []
+  let turnPoints = []
+
+  try {
+    if (record.violationPoints) {
+      violations = JSON.parse(record.violationPoints)
+    }
+  } catch (e) {
+    console.error('[MapTools] 解析禁行点失败:', e)
+  }
+
+  try {
+    if (record.turnPoints) {
+      turnPoints = JSON.parse(record.turnPoints)
+    }
+  } catch (e) {
+    console.error('[MapTools] 解析转弯点失败:', e)
+  }
+
+  const analysisResult = {
+    isPassable: record.isPassable,
+    routeGeoJson: record.routeGeoJson,
+    violations: violations,
+    turnPoints: turnPoints,
+    totalDistance: null,
+    estimatedTime: null
+  }
+
+  // 恢复货车参数
+  if (record.truckLength) {
+    truckParams.value.length = record.truckLength
+    truckParams.value.width = record.truckWidth
+    truckParams.value.height = record.truckHeight
+    truckParams.value.weight = record.truckWeight
+    truckParams.value.wheelbase = record.wheelbase
+  }
+
+  // 通知父组件显示结果
+  emit('truck-analysis-locate', analysisResult)
+  showHistoryDialog.value = false
+  ElMessage.success('已加载历史分析结果')
+}
+
+// 加载已保存结果
+const loadSavedResult = async (item) => {
+  try {
+    // 恢复表单数据
+    const currentRecord = analysisRecords.value.find(r => r.id === currentRecordId.value)
+
+    // 恢复货车参数
+    if (item.truckParams) {
+      truckParams.value = item.truckParams
+    }
+
+    // 恢复分析结果
+    const analysisResult = {
+      isPassable: item.isPassable,
+      routeGeoJson: item.routeGeoJson,
+      turnPoints: item.turnPoints,
+      violations: item.violations,
+      totalDistance: item.totalDistance,
+      estimatedTime: item.estimatedTime
+    }
+
+    // 通知父组件显示结果
+    emit('truck-analysis-locate', analysisResult)
+
+    showSavedListDialog.value = false
+    ElMessage.success('已加载保存的分析结果')
+  } catch (error) {
+    console.error('[MapTools] 加载结果失败:', error)
+    ElMessage.error('加载失败：' + error.message)
+  }
+}
+
+// 删除已保存的结果
+const deleteSaved = async (id) => {
+  try {
+    await ElMessageBox.confirm('确定要删除这条保存的分析结果吗？', '确认删除', {
+      type: 'warning'
+    })
+
+    const response = await fetch(`/api/truck-analysis/geojson/${id}`, {
+      method: 'DELETE',
+      headers: {
+        'Authorization': `Bearer ${localStorage.getItem('token')}`
+      }
+    })
+
+    if (response.ok) {
+      ElMessage.success('删除成功')
+      loadSavedList()  // 刷新列表
+    } else {
+      ElMessage.error('删除失败')
+    }
+  } catch (error) {
+    if (error !== 'cancel') {
+      console.error('[MapTools] 删除失败:', error)
+      ElMessage.error('删除失败：' + error.message)
+    }
+  }
+}
+
 // 暴露方法
 defineExpose({
   handleDrawEvent,
-  loadBatches
+  loadBatches,
+  loadRoadNetworks
 })
 </script>
 
@@ -1495,5 +2094,43 @@ defineExpose({
 
 .batch-edit :deep(.el-input) {
   max-width: 200px;
+}
+
+/* 路网管理样式 */
+.road-network-header {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 15px;
+}
+
+.road-network-list {
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+.network-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px;
+  border-radius: 6px;
+  background: #f5f7fa;
+  margin-bottom: 8px;
+}
+
+.network-item:hover {
+  background: #ecf5ff;
+}
+
+.network-info {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 1;
+}
+
+.network-actions {
+  display: flex;
+  gap: 4px;
 }
 </style>

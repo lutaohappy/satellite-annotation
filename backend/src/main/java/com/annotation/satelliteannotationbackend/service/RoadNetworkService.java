@@ -155,6 +155,15 @@ public class RoadNetworkService {
     }
 
     /**
+     * 获取路网的 GeoJSON 文件路径
+     */
+    public String findGeoJsonPathById(Long id) {
+        return networkRepository.findById(id)
+            .map(RoadNetwork::getGeojsonPath)
+            .orElse(null);
+    }
+
+    /**
      * 创建下载任务
      */
     @Transactional
@@ -176,8 +185,8 @@ public class RoadNetworkService {
      * 异步执行下载任务
      */
     @Async("taskExecutor")
-    @Transactional
     public void executeDownloadTask(Long taskId) {
+        System.out.println("[AsyncTask] 开始执行任务：" + taskId);
         RoadNetworkDownloadTask task = taskRepository.findById(taskId)
             .orElseThrow(() -> new RuntimeException("任务不存在：" + taskId));
 
@@ -187,6 +196,7 @@ public class RoadNetworkService {
             task.setStartedAt(LocalDateTime.now());
             task.setProgress(10);
             taskRepository.save(task);
+            System.out.println("[AsyncTask] 任务 " + taskId + " 状态更新为 DOWNLOADING");
 
             // 1. 调用 Overpass API 下载数据
             DownloadNetworkRequest request = new DownloadNetworkRequest();
@@ -197,9 +207,11 @@ public class RoadNetworkService {
             request.setMaxLat(task.getMaxLat());
             request.setMaxLon(task.getMaxLon());
 
+            System.out.println("[AsyncTask] 任务 " + taskId + " 开始下载路网数据");
             String geojsonPath = overpassService.downloadRoadNetwork(request);
             task.setProgress(50);
             taskRepository.save(task);
+            System.out.println("[AsyncTask] 任务 " + taskId + " 路网数据下载完成：" + geojsonPath);
 
             // 2. 创建路网记录
             RoadNetwork network = new RoadNetwork();

@@ -47,17 +47,6 @@
 
       <el-divider direction="vertical" />
 
-      <!-- 货车分析功能 -->
-      <el-tooltip content="路网数据下载">
-        <el-button @click="showRoadNetworkDialog = true">路网下载</el-button>
-      </el-tooltip>
-
-      <el-tooltip content="货车通过性分析">
-        <el-button @click="showTruckAnalysisPanel = !showTruckAnalysisPanel">货车分析</el-button>
-      </el-tooltip>
-
-      <el-divider direction="vertical" />
-
       <!-- 影像功能 -->
       <el-tooltip content="上传影像">
         <el-button @click="openImageUpload">
@@ -102,6 +91,9 @@
       @create-project="handleCreateProjectFromTool"
       @create-placeholder-project="handleCreatePlaceholderProject"
       @open-road-network-download="showRoadNetworkDialog = true"
+      @truck-analysis-select="handleTruckAnalysisSelect"
+      @truck-analysis-locate="handleTruckAnalysisLocate"
+      @truck-analysis-hide="handleTruckAnalysisHide"
     />
 
     <!-- 状态栏 -->
@@ -215,15 +207,17 @@ import { fromLonLat, toLonLat } from 'ol/proj'
 import MousePosition from 'ol/control/MousePosition'
 import { Draw, Modify, Select, Translate } from 'ol/interaction'
 import XYZ from 'ol/source/XYZ'
-import { Style, Icon, Stroke, Fill, Circle } from 'ol/style'
+import { Style, Icon, Stroke, Fill, Circle, Text } from 'ol/style'
 import { Circle as CircleGeom, Polygon, Point, LineString } from 'ol/geom'
 import { fromExtent } from 'ol/geom/Polygon'
+import GeoJSON from 'ol/format/GeoJSON'
+import Overlay from 'ol/Overlay'
 import { getImages, getImage, getImageFileUrl, getImagePreviewUrl, createPlaceholder } from '@/api/image'
 import { getRoadNetworks } from '@/api/roadNetwork'
 import { Location, Delete, Refresh } from '@element-plus/icons-vue'
 
 // 版本号
-const BUILD_VERSION = 'v2.6 (20260416-32-路网下载任务列表)'
+const BUILD_VERSION = 'v3.0 (20260421-43-路段详情对话框)'
 console.log('[MapView] 当前版本:', BUILD_VERSION)
 console.log('%c [Map] 当前版本:', 'background: #f00; color: #fff; font-size: 16px;', BUILD_VERSION)
 console.log('%c [Map] 双层地图架构：底层 (底图 + 影像) + 上层 (矢量标注)', 'background: #00f; color: #fff; font-size: 14px;')
@@ -453,7 +447,15 @@ const initMap = () => {
   // ========== 交互添加到地图 ==========
   console.log('[Select init] 创建 Select 交互，版本:', BUILD_VERSION)
   select = new Select({
-    style: null
+    style: null,
+    // 排除货车分析的标记点（起点/终点）
+    filter: (feature) => {
+      const pointType = feature.get('pointType')
+      if (pointType === 'start' || pointType === 'end') {
+        return false  // 不选择起点/终点标记
+      }
+      return true
+    }
   })
   map.addInteraction(select)
 
@@ -484,12 +486,16 @@ const initMap = () => {
     contextMenuVisible.value = false
   })
 
-  // 货车分析选点处理
+  // 货车分析选点处理（旧流程：从 TruckAnalysisPanel 来）
   map.on('click', (e) => {
-    // 货车分析 - 选择起点
+    console.log('[MapClick] truckAnalysisSelectMode:', truckAnalysisSelectMode.value)
+    console.log('[MapClick] truckAnalysisCallback:', truckAnalysisCallback)
+
+    // 货车分析 - 选择起点（旧流程）
     if (truckAnalysisSelectMode.value === 'select-start') {
       const coord = e.coordinate
       const lonLat = [coord[0], coord[1]]
+      console.log('[MapClick] 选择起点，坐标:', coord)
       if (truckAnalysisCallback) {
         truckAnalysisCallback(coord[1], coord[0])
       }
@@ -498,14 +504,38 @@ const initMap = () => {
       return
     }
 
-    // 货车分析 - 选择终点
+    // 货车分析 - 选择终点（旧流程）
     if (truckAnalysisSelectMode.value === 'select-end') {
       const coord = e.coordinate
+      console.log('[MapClick] 选择终点，坐标:', coord)
       if (truckAnalysisCallback) {
         truckAnalysisCallback(coord[1], coord[0])
       }
       truckAnalysisSelectMode.value = null
       ElMessage.success('终点已选择')
+      return
+    }
+
+    // 货车分析选点（新流程：从 MapTools 来）
+    if (truckAnalysisSelectCallback && truckAnalysisSelectStep) {
+      const coord = e.coordinate
+      // 将墨卡托坐标转换为经纬度
+      const lonLat = toLonLat(coord)
+      const lat = lonLat[1]
+      const lon = lonLat[0]
+
+      if (truckAnalysisSelectStep === 'start') {
+        // 选择起点
+        truckAnalysisSelectCallback(lat, lon, 'start')
+        truckAnalysisSelectStep = 'end'
+        ElMessage.success('起点已选择，请选择终点')
+      } else if (truckAnalysisSelectStep === 'end') {
+        // 选择终点
+        truckAnalysisSelectCallback(lat, lon, 'end')
+        truckAnalysisSelectCallback = null
+        truckAnalysisSelectStep = null
+        ElMessage.success('终点已选择，请点击"计算分析"')
+      }
       return
     }
 
@@ -2525,12 +2555,19 @@ const handleRoadNetworkDownloadComplete = (result) => {
   ElMessage.success('路网数据下载成功')
   showRoadNetworkDialog.value = false
 
-  // 刷新路网列表
-  loadRoadNetworks()
+  // 刷新 MapTools 中的路网列表
+  if (mapToolsRef.value && mapToolsRef.value.loadRoadNetworks) {
+    mapToolsRef.value.loadRoadNetworks()
+  }
 }
 
 // 加载路网列表
 const loadRoadNetworks = async () => {
+  // 检查是否登录，未登录时不加载
+  const token = localStorage.getItem('token')
+  if (!token) {
+    return
+  }
   try {
     const res = await getRoadNetworks()
     if (res.code === 200) {
@@ -2546,25 +2583,461 @@ const loadRoadNetworks = async () => {
 
 // 货车分析 - 选择起点
 const handleTruckSelectStart = (callback) => {
+  console.log('[TruckAnalysis] handleTruckSelectStart called')
   truckAnalysisSelectMode.value = 'select-start'
   truckAnalysisCallback = callback
+  console.log('[TruckAnalysis] Mode set to:', truckAnalysisSelectMode.value)
+  console.log('[TruckAnalysis] Callback set:', callback)
   ElMessage.info('请在地图上点击选择起点')
 }
 
 // 货车分析 - 选择终点
 const handleTruckSelectEnd = (callback) => {
+  console.log('[TruckAnalysis] handleTruckSelectEnd called')
   truckAnalysisSelectMode.value = 'select-end'
   truckAnalysisCallback = callback
+  console.log('[TruckAnalysis] Mode set to:', truckAnalysisSelectMode.value)
+  console.log('[TruckAnalysis] Callback set:', callback)
   ElMessage.info('请在地图上点击选择终点')
 }
 
 // 显示路线
 const handleShowRoute = (result) => {
+  console.log('[MapView] handleShowRoute called')
+  console.log('[MapView] 分析结果:', result)
+
+  // 清除之前的路线和转弯点图层（但保留起点终点标记）
+  clearTruckAnalysisLayersOnly()
+
   if (result.routeGeoJson) {
     // 在地图上显示路线 GeoJSON
-    console.log('[TruckAnalysis] Route:', result.routeGeoJson)
-    // TODO: 解析 GeoJSON 并添加到地图
+    console.log('[MapView] Route GeoJSON length:', result.routeGeoJson.length)
+    console.log('[MapView] Route GeoJSON preview:', result.routeGeoJson.substring(0, 300))
+    loadRouteGeoJSON(result.routeGeoJson)
+  } else {
+    console.warn('[MapView] No routeGeoJson in result')
   }
+
+  // 显示转弯点
+  if (result.turnPoints && result.turnPoints.length > 0) {
+    console.log('[MapView] Turn points count:', result.turnPoints.length)
+    console.log('[MapView] First turn point:', result.turnPoints[0])
+    loadTurnPoints(result.turnPoints)
+  } else {
+    console.log('[MapView] No turnPoints in result')
+  }
+
+  // 显示禁行点
+  if (result.violations && result.violations.length > 0) {
+    console.log('[MapView] Violations count:', result.violations.length)
+    console.log('[MapView] First violation:', result.violations[0])
+    loadViolations(result.violations)
+  } else {
+    console.log('[MapView] No violations in result')
+  }
+
+  // 加载起点和终点标记（从 form 获取）
+  const formStartLat = window.truckAnalysisForm?.startLat
+  const formStartLon = window.truckAnalysisForm?.startLon
+  const formEndLat = window.truckAnalysisForm?.endLat
+  const formEndLon = window.truckAnalysisForm?.endLon
+
+  if (formStartLat && formStartLon && formEndLat && formEndLon) {
+    loadStartEndMarkers(formStartLat, formStartLon, formEndLat, formEndLon)
+  }
+}
+
+// 清除货车分析相关图层（保留起点终点标记）
+const clearTruckAnalysisLayersOnly = () => {
+  if (truckAnalysisRouteLayer) {
+    map.removeLayer(truckAnalysisRouteLayer)
+    truckAnalysisRouteLayer = null
+  }
+  if (truckAnalysisTurnPointsLayer) {
+    map.removeLayer(truckAnalysisTurnPointsLayer)
+    truckAnalysisTurnPointsLayer = null
+  }
+  if (truckAnalysisViolationPointsLayer) {
+    map.removeLayer(truckAnalysisViolationPointsLayer)
+    truckAnalysisViolationPointsLayer = null
+  }
+}
+
+// 清除货车分析相关图层（包括起点终点标记）
+const clearTruckAnalysisLayers = () => {
+  clearTruckAnalysisLayersOnly()
+  if (truckAnalysisStartEndLayer) {
+    map.removeLayer(truckAnalysisStartEndLayer)
+    truckAnalysisStartEndLayer = null
+  }
+}
+
+// 加载起点和终点标记
+const loadStartEndMarkers = (startLat, startLon, endLat, endLon) => {
+  const features = []
+
+  // 起点标记 - S（绿色）
+  const startCoordinate = fromLonLat([startLon, startLat])
+  const startFeature = new Feature({
+    geometry: new Point(startCoordinate),
+    type: 'start'
+  })
+  startFeature.setStyle(new Style({
+    image: new Circle({
+      radius: 10,
+      fill: new Fill({ color: '#67c23a' }),  // 绿色
+      stroke: new Stroke({ color: '#fff', width: 3 })
+    }),
+    text: new Text({
+      text: 'S',
+      font: 'bold 16px Arial',
+      fill: new Fill({ color: '#fff' }),
+      stroke: new Stroke({ color: '#67c23a', width: 3 }),
+      offsetY: 0
+    }),
+    zIndex: 100
+  }))
+  features.push(startFeature)
+
+  // 终点标记 - E（红色）
+  const endCoordinate = fromLonLat([endLon, endLat])
+  const endFeature = new Feature({
+    geometry: new Point(endCoordinate),
+    type: 'end'
+  })
+  endFeature.setStyle(new Style({
+    image: new Circle({
+      radius: 10,
+      fill: new Fill({ color: '#f56c6c' }),  // 红色
+      stroke: new Stroke({ color: '#fff', width: 3 })
+    }),
+    text: new Text({
+      text: 'E',
+      font: 'bold 16px Arial',
+      fill: new Fill({ color: '#fff' }),
+      stroke: new Stroke({ color: '#f56c6c', width: 3 }),
+      offsetY: 0
+    }),
+    zIndex: 100
+  }))
+  features.push(endFeature)
+
+  const source = new VectorSource({ features })
+
+  truckAnalysisStartEndLayer = new VectorLayer({
+    source,
+    zIndex: 100
+  })
+
+  map.addLayer(truckAnalysisStartEndLayer)
+}
+
+// 起点终点图层引用
+let truckAnalysisStartEndLayer = null
+
+// 加载路线 GeoJSON
+const loadRouteGeoJSON = (geojsonString) => {
+  try {
+    const geojson = JSON.parse(geojsonString)
+    console.log('[TruckAnalysis] Parsed geojson:', geojson)
+
+    // 如果是 LineString 几何体，需要转换为 Feature
+    let features
+    if (geojson.type === 'LineString' && geojson.coordinates) {
+      // 将 LineString 几何体转换为 Feature
+      const lineStringFeature = new GeoJSON().readFeature(geojson, {
+        featureProjection: 'EPSG:3857'
+      })
+      features = [lineStringFeature]
+    } else {
+      // 已经是 Feature 或 FeatureCollection
+      features = new GeoJSON().readFeatures(geojson, {
+        featureProjection: 'EPSG:3857'
+      })
+    }
+
+    const source = new VectorSource({ features })
+
+    truckAnalysisRouteLayer = new VectorLayer({
+      source,
+      style: new Style({
+        stroke: new Stroke({
+          color: '#000000',  // 黑色路线
+          width: 6
+        })
+      }),
+      zIndex: 100
+    })
+
+    map.addLayer(truckAnalysisRouteLayer)
+
+    // 自动缩放到路线范围 - 使用更宽松的缩放
+    const extent = source.getExtent()
+    if (extent && extent[0] !== Infinity) {
+      // 扩大范围以便更好地查看
+      const expandedExtent = [
+        extent[0] - (extent[2] - extent[0]) * 0.2,
+        extent[1] - (extent[3] - extent[1]) * 0.2,
+        extent[2] + (extent[2] - extent[0]) * 0.2,
+        extent[3] + (extent[3] - extent[1]) * 0.2
+      ]
+      map.getView().fit(expandedExtent, { duration: 500, padding: [50, 50, 50, 50], maxZoom: 13 })
+    }
+  } catch (error) {
+    console.error('[TruckAnalysis] 加载路线失败:', error)
+  }
+}
+
+// 加载转弯点
+const loadTurnPoints = (turnPoints) => {
+  const features = []
+
+  turnPoints.forEach(point => {
+    const coordinate = fromLonLat([point.lon, point.lat])
+
+    // 判断是否急转弯
+    const minRadius = truck.value?.wheelbase / 0.574
+    const isSharp = point.isSharpTurn || (point.turnRadius && point.turnRadius < minRadius)
+    const color = isSharp ? '#f56c6c' : '#409eff'
+
+    // 创建转弯点符号（合并点和文字标注）
+    const pointFeature = new Feature({
+      geometry: new Point(coordinate),
+      turnPoint: point
+    })
+
+    const styleOptions = {
+      image: new Circle({
+        radius: isSharp ? 8 : 6,
+        fill: new Fill({ color }),
+        stroke: new Stroke({ color: '#fff', width: 2 })
+      })
+    }
+
+    // 添加文字标注（显示转弯半径）
+    if (point.turnRadius) {
+      styleOptions.text = new Text({
+        text: `${point.turnRadius.toFixed(1)}m`,
+        font: 'bold 12px Arial',
+        fill: new Fill({ color: isSharp ? '#f56c6c' : '#409eff' }),
+        stroke: new Stroke({ color: '#fff', width: 3 }),
+        offsetY: -15,
+        textAlign: 'center'
+      })
+    }
+
+    pointFeature.setStyle(new Style(styleOptions))
+    features.push(pointFeature)
+  })
+
+  const source = new VectorSource({ features })
+
+  truckAnalysisTurnPointsLayer = new VectorLayer({
+    source,
+    zIndex: 101
+  })
+
+  map.addLayer(truckAnalysisTurnPointsLayer)
+
+  // 添加点击 popup 显示详情
+  setupTurnPointPopup()
+}
+
+// 加载禁行点
+const loadViolations = (violations) => {
+  const features = []
+
+  violations.forEach((point, index) => {
+    const coordinate = fromLonLat([point.lon, point.lat])
+
+    // 创建禁行点要素
+    const feature = new Feature({
+      geometry: new Point(coordinate),
+      violation: point,
+      violationIndex: index
+    })
+
+    // 根据违规类型使用不同样式
+    let styleConfig = {
+      image: new Circle({
+        radius: 10,
+        fill: new Fill({ color: '#f56c6c' }),
+        stroke: new Stroke({ color: '#fff', width: 2 })
+      }),
+      zIndex: 102
+    }
+
+    // 根据违规类型设置不同颜色
+    if (point.reason === '转弯半径不足') {
+      styleConfig = {
+        image: new Circle({
+          radius: 10,
+          fill: new Fill({ color: '#e6a23c' }),
+          stroke: new Stroke({ color: '#fff', width: 2 })
+        }),
+        zIndex: 102
+      }
+    } else if (point.reason === '轮渡路段') {
+      styleConfig = {
+        image: new Circle({
+          radius: 10,
+          fill: new Fill({ color: '#909399' }),
+          stroke: new Stroke({ color: '#fff', width: 2 })
+        }),
+        zIndex: 102
+      }
+    }
+
+    feature.setStyle(new Style(styleConfig))
+    features.push(feature)
+
+    // 添加禁行标志符号（X 标记）
+    const xFeature = new Feature({
+      geometry: new Point(coordinate),
+      violation: point
+    })
+
+    // 使用文字 X 作为禁行标志
+    xFeature.setStyle(new Style({
+      text: new Text({
+        text: '⛔',
+        font: '20px Arial',
+        fill: new Fill({ color: '#f56c6c' }),
+        offsetY: 0
+      }),
+      zIndex: 103
+    }))
+
+    features.push(xFeature)
+  })
+
+  const source = new VectorSource({ features })
+
+  // 创建禁行点图层
+  const violationsLayer = new VectorLayer({
+    source,
+    zIndex: 102
+  })
+  violationsLayer.set('type', 'violations')
+
+  map.addLayer(violationsLayer)
+
+  // 存储图层引用以便后续清除
+  if (!truckAnalysisViolationPointsLayer) {
+    truckAnalysisViolationPointsLayer = violationsLayer
+  }
+
+  // 添加点击 popup 显示详情
+  setupViolationPopup()
+}
+
+// 禁行点图层引用
+let truckAnalysisViolationPointsLayer = null
+
+// 设置转弯点 Popup
+const setupTurnPointPopup = () => {
+  // 移除旧的点击监听
+  if (turnPointClickHandler) {
+    map.un('click', turnPointClickHandler)
+  }
+
+  turnPointClickHandler = (e) => {
+    const feature = map.forEachFeatureAtPixel(e.pixel, (f) => f)
+    if (feature && feature.get('turnPoint')) {
+      const point = feature.get('turnPoint')
+      const coord = e.coordinate
+
+      // 创建 popup 内容
+      const overlay = createTurnPointOverlay(coord, point)
+      showOverlay(overlay)
+    } else if (feature && feature.get('violation')) {
+      // 点击的是禁行点
+      const point = feature.get('violation')
+      const coord = e.coordinate
+
+      const overlay = createViolationOverlay(coord, point)
+      showOverlay(overlay)
+    }
+  }
+
+  map.on('click', turnPointClickHandler)
+}
+
+// 设置禁行点 Popup
+const setupViolationPopup = () => {
+  // 与转弯点共用同一个点击监听器
+  // 在 setupTurnPointPopup 中已经处理
+}
+
+// 创建禁行点 overlay
+const createViolationOverlay = (coordinate, point) => {
+  const content = `
+    <div style="padding: 10px; min-width: 220px;">
+      <h4 style="margin: 0 0 10px; color: #f56c6c;">${point.reason}</h4>
+      <div style="font-size: 13px; line-height: 1.8;">
+        <div><strong>详情:</strong> ${point.detail}</div>
+        ${point.turnAngle ? `<div><strong>转弯角度:</strong> ${point.turnAngle.toFixed(1)}°</div>` : ''}
+        ${point.turnRadius ? `<div><strong>转弯半径:</strong> ${point.turnRadius.toFixed(1)}m</div>` : ''}
+        <div style="margin-top: 10px; color: #909399; font-size: 12px;">
+          位置：${point.lat.toFixed(6)}, ${point.lon.toFixed(6)}
+        </div>
+      </div>
+    </div>
+  `
+
+  return new Overlay({
+    position: coordinate,
+    positioning: 'bottom-center',
+    element: createOverlayElement(content),
+    offset: [0, -10]
+  })
+}
+
+// 创建转弯点 overlay
+const createTurnPointOverlay = (coordinate, point) => {
+  const content = `
+    <div style="padding: 10px; min-width: 200px;">
+      <h4 style="margin: 0 0 10px; color: #303133;">转弯点 #${point.sequence}</h4>
+      <div style="font-size: 13px; line-height: 1.8;">
+        <div><strong>转向:</strong> ${point.instruction}</div>
+        <div><strong>角度:</strong> <span style="color: ${point.isSharpTurn ? '#f56c6c' : '#409eff'}; font-weight: bold;">${point.turnAngle?.toFixed(1)}°</span></div>
+        <div><strong>半径:</strong> ${point.turnRadius ? point.turnRadius.toFixed(1) + 'm' : 'N/A'}</div>
+        <div><strong>进入方位:</strong> ${point.bearingBefore?.toFixed(0)}°</div>
+        <div><strong>离开方位:</strong> ${point.bearingAfter?.toFixed(0)}°</div>
+      </div>
+    </div>
+  `
+
+  return new Overlay({
+    position: coordinate,
+    positioning: 'bottom-center',
+    element: createOverlayElement(content),
+    offset: [0, -10]
+  })
+}
+
+// 创建 overlay DOM 元素
+const createOverlayElement = (content) => {
+  const el = document.createElement('div')
+  el.className = 'turn-point-popup'
+  el.innerHTML = content
+  el.style.cssText = `
+    background: white;
+    border-radius: 8px;
+    box-shadow: 0 2px 12px rgba(0,0,0,0.2);
+    padding: 0;
+    margin: 0;
+  `
+  return el
+}
+
+// 显示 overlay
+const showOverlay = (overlay) => {
+  if (currentOverlay) {
+    map.removeOverlay(currentOverlay)
+  }
+  map.addOverlay(overlay)
+  currentOverlay = overlay
 }
 
 // 定位禁行点
@@ -2578,8 +3051,53 @@ const handleLocatePoint = (point) => {
   }
 }
 
+// 货车分析选点处理（新流程：从 MapTools 来）
+let truckAnalysisSelectCallback = null
+let truckAnalysisSelectStep = null  // 'start' or 'end'
+
+const handleTruckAnalysisSelect = (callback) => {
+  truckAnalysisSelectCallback = callback
+  truckAnalysisSelectStep = 'start'
+  ElMessage.info('请在地图上点击选择起点')
+}
+
+const handleTruckAnalysisLocate = (result) => {
+  console.log('[TruckAnalysis] handleTruckAnalysisLocate called')
+  console.log('[TruckAnalysis] Result:', result)
+
+  // 后端返回格式：{code: 200, message: 'success', data: AnalysisResultDTO}
+  // 需要解包 data
+  const analysisResult = result.data || result
+
+  console.log('[TruckAnalysis] Unwrapped result:', analysisResult)
+  console.log('[TruckAnalysis] routeGeoJson:', analysisResult.routeGeoJson)
+  console.log('[TruckAnalysis] turnPoints:', analysisResult.turnPoints)
+
+  handleShowRoute(analysisResult)
+}
+
+const handleTruckAnalysisHide = () => {
+  console.log('[TruckAnalysis] handleTruckAnalysisHide called')
+  clearTruckAnalysisLayers()
+  ElMessage.info('路线已隐藏')
+}
+
+// 更新 map click 事件中的货车分析处理逻辑
+// 在已有的 map click 事件中，需要添加对新流程的支持
+
 let roadNetworkDrawCallback = null
 let truckAnalysisCallback = null
+
+// 货车分析图层相关
+let truckAnalysisRouteLayer = null
+let truckAnalysisTurnPointsLayer = null
+let turnPointClickHandler = null
+let currentOverlay = null
+
+// 货车参数（用于计算最小转弯半径）
+const truck = ref({
+  wheelbase: 8
+})
 
 // 处理影像加载
 const handleImageLoad = (image) => {

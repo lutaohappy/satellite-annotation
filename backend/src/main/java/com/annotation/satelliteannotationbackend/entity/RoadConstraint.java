@@ -42,8 +42,11 @@ public class RoadConstraint {
     @Column(name = "max_axle_weight")
     private Double maxAxleWeight;     // 轴重限制 (吨)
 
+    @Column(name = "max_length")
+    private Double maxLength;         // 限长 (米)
+
     @Column(name = "min_length")
-    private Double minLength;         // 长度限制 (米)
+    private Double minLength;         // 最小长度 (米)
 
     @Column(name = "restriction_type", length = 50)
     private String restrictionType;   // 限制类型：no_trucks, weight_limit, height_limit 等
@@ -126,6 +129,14 @@ public class RoadConstraint {
 
     public void setMaxAxleWeight(Double maxAxleWeight) {
         this.maxAxleWeight = maxAxleWeight;
+    }
+
+    public Double getMaxLength() {
+        return maxLength;
+    }
+
+    public void setMaxLength(Double maxLength) {
+        this.maxLength = maxLength;
     }
 
     public Double getMinLength() {

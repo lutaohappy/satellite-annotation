@@ -1,5 +1,6 @@
 package com.annotation.satelliteannotationbackend.security;
 
+import com.annotation.satelliteannotationbackend.entity.User;
 import com.annotation.satelliteannotationbackend.service.UserDetailsServiceImpl;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
@@ -40,6 +41,11 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             @NonNull FilterChain filterChain
     ) throws ServletException, IOException {
         final String authHeader = request.getHeader("Authorization");
+        logger.debug("[JWT Filter] Authorization header: {}", authHeader != null ? "present" : "null");
+        logger.debug("[JWT Filter] Header value length: {}", authHeader != null ? authHeader.length() : 0);
+        if (authHeader != null) {
+            logger.debug("[JWT Filter] Header starts with 'Bearer ': {}", authHeader.startsWith("Bearer "));
+        }
 
         if (authHeader == null || !authHeader.startsWith("Bearer ")) {
             filterChain.doFilter(request, response);
@@ -49,13 +55,22 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         try {
             String jwt = authHeader.substring(7);
             String username = jwtUtil.extractUsername(jwt);
+            logger.debug("[JWT Filter] Extracted username: {}", username);
 
             if (username != null && SecurityContextHolder.getContext().getAuthentication() == null) {
                 UserDetails userDetails = this.userDetailsService.loadUserByUsername(username);
+                logger.debug("[JWT Filter] Loaded UserDetails: {}", userDetails.getClass().getName());
 
                 if (jwtUtil.validateToken(jwt, userDetails)) {
+                    // 从 UserDetailsServiceImpl 中获取 User 实体（如果可能）
+                    User userEntity = null;
+                    if (userDetails instanceof com.annotation.satelliteannotationbackend.service.UserDetailsImpl) {
+                        userEntity = ((com.annotation.satelliteannotationbackend.service.UserDetailsImpl) userDetails).getUser();
+                    }
+                    logger.debug("[JWT Filter] User entity: {}", userEntity != null ? "found" : "null");
+
                     UsernamePasswordAuthenticationToken authToken = new UsernamePasswordAuthenticationToken(
-                            userDetails,
+                            userEntity != null ? userEntity : userDetails,
                             null,
                             userDetails.getAuthorities()
                     );

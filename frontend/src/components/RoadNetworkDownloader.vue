@@ -1,7 +1,7 @@
 <template>
   <div class="road-network-downloader">
     <!-- 任务列表 -->
-    <div v-if="taskList.length > 0" class="task-list-section">
+    <div class="task-list-section">
       <div class="task-list-header">
         <span class="section-title">下载任务</span>
         <div class="task-list-actions">
@@ -14,50 +14,48 @@
         </div>
       </div>
 
-      <div class="task-items" :class="{ 'show-all': showAllTasks }">
+      <!-- 任务列表内容 -->
+      <div v-if="taskList.length > 0" class="task-items" :class="{ 'show-all': showAllTasks }">
         <div v-for="task in displayTasks" :key="task.id" class="task-item">
           <div class="task-header">
             <span class="task-name">{{ task.taskName }}</span>
             <el-tag :type="getStatusTagType(task.status)" size="small">{{ getStatusText(task.status) }}</el-tag>
           </div>
-          <el-progress
-            :percentage="task.progress"
-            :status="task.status === 'FAILED' ? 'exception' : (task.status === 'COMPLETED' ? 'success' : null)"
-          />
+          <div class="task-info">
+            <span>区域：{{ task.region || '无' }}</span>
+          </div>
+          <div class="task-info">
+            <span>创建时间：{{ new Date(task.createdAt).toLocaleString() }}</span>
+            <span v-if="task.completedAt" style="margin-left: 10px">完成时间：{{ new Date(task.completedAt).toLocaleString() }}</span>
+          </div>
+          <!-- 进度条 -->
+          <div v-if="task.status === 'DOWNLOADING' || task.status === 'PROCESSING' || task.status === 'COMPLETED'" class="task-progress">
+            <el-progress :percentage="task.progress || 0" :status="task.status === 'COMPLETED' ? 'success' : undefined" />
+          </div>
           <div v-if="task.status === 'FAILED'" class="error-message">
-            {{ task.errorMessage }}
+            失败原因：{{ task.errorMessage }}
           </div>
           <div class="task-actions">
-            <el-button
-              v-if="task.status === 'FAILED' || task.status === 'CANCELLED'"
-              type="primary"
-              size="small"
-              @click="handleRetry(task.id)"
-            >
-              重试
-            </el-button>
-            <el-button
-              v-if="task.status === 'PENDING'"
-              type="warning"
-              size="small"
-              @click="handleCancel(task.id)"
-            >
-              取消
-            </el-button>
-            <el-button
-              v-if="task.status === 'COMPLETED'"
-              type="success"
-              size="small"
-              @click="handleViewResult(task)"
-            >
-              查看
-            </el-button>
+            <template v-if="task.status === 'PENDING' || task.status === 'DOWNLOADING' || task.status === 'PROCESSING'">
+              <el-button link type="danger" size="small" @click="handleCancel(task.id)">取消</el-button>
+            </template>
+            <template v-if="task.status === 'FAILED'">
+              <el-button link type="primary" size="small" @click="handleRetry(task.id)">重试</el-button>
+            </template>
+            <template v-if="task.status === 'COMPLETED' && task.roadNetworkId">
+              <el-button link type="success" size="small" @click="handleDownload(task)">下载</el-button>
+              <el-button link type="info" size="small" @click="handleViewResult(task)">查看结果</el-button>
+            </template>
           </div>
         </div>
       </div>
+
+      <div v-else class="empty-tasks">
+        <el-empty description="暂无下载任务，请创建新任务" :image-size="60" />
+      </div>
     </div>
 
-    <el-form :model="form" label-width="100px" label-position="left">
+    <el-form :model="form" label-width="100px" label-position="left" @submit.prevent>
       <!-- 路网名称 -->
       <el-form-item label="路网名称">
         <el-input v-model="form.name" placeholder="例如：北京市朝阳区路网" />
@@ -80,7 +78,7 @@
         <div class="coordinate-inputs">
           <el-input
             v-model="form.minLat"
-            placeholder="最小纬度"
+            placeholder="39.9"
             :disabled="true"
             size="small"
           >
@@ -88,7 +86,7 @@
           </el-input>
           <el-input
             v-model="form.minLon"
-            placeholder="最小经度"
+            placeholder="116.4"
             :disabled="true"
             size="small"
           >
@@ -96,7 +94,7 @@
           </el-input>
           <el-input
             v-model="form.maxLat"
-            placeholder="最大纬度"
+            placeholder="40.9"
             :disabled="true"
             size="small"
           >
@@ -104,7 +102,7 @@
           </el-input>
           <el-input
             v-model="form.maxLon"
-            placeholder="最大经度"
+            placeholder="117.4"
             :disabled="true"
             size="small"
           >
@@ -124,14 +122,14 @@
       <!-- 创建任务按钮 -->
       <el-form-item>
         <el-button
-          type="primary"
+          type="button"
           @click="createTask"
           :loading="creatingTask"
           :disabled="!canDownload"
         >
-          下载路网数据
+          创建下载路网数据任务
         </el-button>
-        <el-button @click="resetForm">重置</el-button>
+        <el-button type="button" @click="resetForm">重置</el-button>
       </el-form-item>
     </el-form>
   </div>
@@ -140,8 +138,8 @@
 <script setup>
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { ElMessage } from 'element-plus'
-import { Refresh } from '@element-plus/icons-vue'
-import { createDownloadTask, getTaskList, retryTask, cancelTask, getTaskDetail } from '@/api/roadNetwork'
+import { Refresh, Download } from '@element-plus/icons-vue'
+import { createDownloadTask, getTaskList, retryTask, cancelTask, getTaskDetail, downloadTaskFile } from '@/api/roadNetwork'
 
 const props = defineProps({
   map: Object  // 地图实例
@@ -224,6 +222,7 @@ const startDraw = () => {
 
 // 创建任务
 const createTask = async () => {
+  console.log('[RoadNetworkDownloader] createTask called')
   if (!canDownload.value) {
     ElMessage.warning('请先填写完整信息并选择区域')
     return
@@ -241,7 +240,10 @@ const createTask = async () => {
       maxLon: parseFloat(form.value.maxLon)
     }
 
+    console.log('[RoadNetworkDownloader] Creating task with params:', params)
+
     const result = await createDownloadTask(params)
+    console.log('[RoadNetworkDownloader] Task created:', result)
 
     ElMessage.success('任务已创建，ID: ' + result.data.id)
 
@@ -266,10 +268,19 @@ const createTask = async () => {
 
 // 加载任务列表
 const loadTaskList = async () => {
+  console.log('[RoadNetworkDownloader] loadTaskList, token:', !!localStorage.getItem('token'))
+  // 检查是否登录
+  const token = localStorage.getItem('token')
+  if (!token) {
+    taskList.value = []
+    return
+  }
   try {
     const res = await getTaskList()
+    console.log('[RoadNetworkDownloader] loadTaskList result:', res)
     if (res.code === 200) {
       taskList.value = res.data || []
+      console.log('[RoadNetworkDownloader] taskList:', taskList.value.length)
       // 为进行中的任务启动轮询
       taskList.value.forEach(task => {
         if (task.status === 'PENDING' || task.status === 'DOWNLOADING' || task.status === 'PROCESSING') {
@@ -358,6 +369,24 @@ const handleViewResult = (task) => {
   }
 }
 
+// 下载文件
+const handleDownload = async (task) => {
+  try {
+    const blob = await downloadTaskFile(task.id)
+    const url = window.URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = `${task.taskName}.geojson`
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
+    window.URL.revokeObjectURL(url)
+    ElMessage.success('文件已下载')
+  } catch (error) {
+    ElMessage.error('下载失败：' + error.message)
+  }
+}
+
 // 重置表单
 const resetForm = () => {
   form.value = {
@@ -372,7 +401,20 @@ const resetForm = () => {
 
 // 组件挂载时加载任务列表
 onMounted(() => {
-  loadTaskList()
+  console.log('[RoadNetworkDownloader] Mounted, token:', !!localStorage.getItem('token'))
+  const token = localStorage.getItem('token')
+  if (token) {
+    loadTaskList()
+  }
+})
+
+// 监听对话框打开，每次打开时刷新任务列表
+const showDialog = ref(false)
+watch(() => showDialog.value, (newVal) => {
+  if (newVal) {
+    console.log('[RoadNetworkDownloader] Dialog opened, loading tasks')
+    loadTaskList()
+  }
 })
 
 // 组件卸载时清理定时器
@@ -401,6 +443,11 @@ onUnmounted(() => {
   justify-content: space-between;
   align-items: center;
   margin-bottom: 10px;
+}
+
+.empty-tasks {
+  padding: 20px 0;
+  text-align: center;
 }
 
 .section-title {
@@ -443,6 +490,16 @@ onUnmounted(() => {
 .task-name {
   font-weight: 500;
   color: #303133;
+}
+
+.task-info {
+  font-size: 12px;
+  color: #909399;
+  margin-bottom: 8px;
+}
+
+.task-progress {
+  margin-bottom: 8px;
 }
 
 .error-message {

@@ -13,6 +13,8 @@ public class ViolationPointDTO {
     private String detail;            // 详细信息
     private Double constraintValue;   // 约束值
     private Double truckValue;        // 车辆值
+    private Double turnAngle;         // 转弯角度（度）- 仅转弯半径不足时有值
+    private Double turnRadius;        // 实际转弯半径（米）- 仅转弯半径不足时有值
 
     // Getters and Setters
 
@@ -64,12 +66,42 @@ public class ViolationPointDTO {
         this.truckValue = truckValue;
     }
 
+    public Double getTurnAngle() {
+        return turnAngle;
+    }
+
+    public void setTurnAngle(Double turnAngle) {
+        this.turnAngle = turnAngle;
+    }
+
+    public Double getTurnRadius() {
+        return turnRadius;
+    }
+
+    public void setTurnRadius(Double turnRadius) {
+        this.turnRadius = turnRadius;
+    }
+
+    /**
+     * 创建禁行点 DTO（通用）
+     */
     public static ViolationPointDTO create(Double lat, Double lon, String reason, String detail) {
         ViolationPointDTO dto = new ViolationPointDTO();
         dto.setLat(lat);
         dto.setLon(lon);
         dto.setReason(reason);
         dto.setDetail(detail);
+        return dto;
+    }
+
+    /**
+     * 创建禁行点 DTO（转弯半径不足）
+     */
+    public static ViolationPointDTO createTurnRadiusViolation(Double lat, Double lon, String detail,
+                                                               Double turnAngle, Double turnRadius) {
+        ViolationPointDTO dto = create(lat, lon, "转弯半径不足", detail);
+        dto.setTurnAngle(turnAngle);
+        dto.setTurnRadius(turnRadius);
         return dto;
     }
 }

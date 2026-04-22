@@ -63,6 +63,17 @@ export function cancelTask(id) {
 }
 
 /**
+ * 下载任务结果文件
+ */
+export function downloadTaskFile(id) {
+  return request({
+    url: `/api/road-network-tasks/${id}/download`,
+    method: 'get',
+    responseType: 'blob'
+  })
+}
+
+/**
  * 获取路网列表
  */
 export function getRoadNetworks() {
@@ -99,5 +110,15 @@ export function deleteRoadNetwork(id) {
   return request({
     url: `/api/road-networks/${id}`,
     method: 'delete'
+  })
+}
+
+/**
+ * 获取路网 GeoJSON
+ */
+export function getRoadNetworkGeoJson(id) {
+  return request({
+    url: `/api/road-networks/${id}/geojson`,
+    method: 'get'
   })
 }

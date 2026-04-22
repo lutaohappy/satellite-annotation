@@ -3,12 +3,20 @@ package com.annotation.satelliteannotationbackend.controller;
 import com.annotation.satelliteannotationbackend.dto.ApiResponse;
 import com.annotation.satelliteannotationbackend.dto.DownloadNetworkRequest;
 import com.annotation.satelliteannotationbackend.dto.RoadNetworkTaskDTO;
+import com.annotation.satelliteannotationbackend.entity.RoadNetwork;
 import com.annotation.satelliteannotationbackend.entity.User;
 import com.annotation.satelliteannotationbackend.service.RoadNetworkService;
+import org.springframework.core.io.FileSystemResource;
+import org.springframework.core.io.Resource;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Paths;
 import java.util.List;
 import java.util.stream.Collectors;
 
@@ -119,5 +127,41 @@ public class RoadNetworkTaskController {
             return ResponseEntity.internalServerError()
                 .body(ApiResponse.error("取消任务失败：" + e.getMessage()));
         }
+    }
+
+    /**
+     * 下载任务结果文件
+     */
+    @GetMapping("/{id}/download")
+    public ResponseEntity<?> downloadTask(@PathVariable Long id, @AuthenticationPrincipal User currentUser) {
+        var task = networkService.getTask(id);
+        if (task == null) {
+            return ResponseEntity.notFound().build();
+        }
+        if (task.getStatus() != com.annotation.satelliteannotationbackend.enums.TaskStatus.COMPLETED) {
+            return ResponseEntity.badRequest()
+                .body(ApiResponse.error("任务未完成，无法下载"));
+        }
+        if (task.getRoadNetworkId() == null) {
+            return ResponseEntity.notFound().build();
+        }
+
+        // 获取路网数据
+        var network = networkService.findById(task.getRoadNetworkId());
+        if (network == null) {
+            return ResponseEntity.notFound().build();
+        }
+
+        // 读取 GeoJSON 文件
+        String geojsonPath = networkService.findGeoJsonPathById(task.getRoadNetworkId());
+        if (geojsonPath == null || !Files.exists(Paths.get(geojsonPath))) {
+            return ResponseEntity.notFound().build();
+        }
+
+        Resource resource = new FileSystemResource(geojsonPath);
+        return ResponseEntity.ok()
+            .contentType(MediaType.APPLICATION_JSON)
+            .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + network.getName() + ".geojson\"")
+            .body(resource);
     }
 }

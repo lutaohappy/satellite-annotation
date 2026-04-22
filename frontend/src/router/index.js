@@ -20,9 +20,12 @@ const router = createRouter({
 
 router.beforeEach((to, from, next) => {
   const token = localStorage.getItem('token')
+  console.log('[Router Guard] from:', from.path, 'to:', to.path, 'hasToken:', !!token)
   if (to.path !== '/login' && !token) {
+    console.log('[Router Guard] Redirecting to login')
     next('/login')
   } else {
+    console.log('[Router Guard] Allowing navigation')
     next()
   }
 })

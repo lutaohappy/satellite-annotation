@@ -33,8 +33,16 @@ public class OverpassService {
     private final ObjectMapper objectMapper;
 
     public OverpassService() {
-        this.restTemplate = new RestTemplate();
         this.objectMapper = new ObjectMapper();
+
+        // 配置 RestTemplate 超时
+        org.springframework.http.client.SimpleClientHttpRequestFactory factory =
+            new org.springframework.http.client.SimpleClientHttpRequestFactory();
+        factory.setConnectTimeout(60000);  // 60 秒连接超时
+        factory.setReadTimeout(180000);    // 180 秒读取超时
+        this.restTemplate = new RestTemplate(factory);
+
+        System.out.println("[OverpassService] Initialized with timeouts: connect=60s, read=180s");
     }
 
     /**
@@ -43,13 +51,17 @@ public class OverpassService {
      * @return GeoJSON 格式的道路网络数据
      */
     public String downloadRoadNetwork(DownloadNetworkRequest request) {
+        System.out.println("[OverpassService] 开始下载路网数据：" + request.getName());
+
         // 构建 Overpass QL 查询
         String query = buildOverpassQuery(
             request.getMinLat(), request.getMinLon(),
             request.getMaxLat(), request.getMaxLon()
         );
+        System.out.println("[OverpassService] 查询区域：" + request.getMinLat() + "," + request.getMinLon() + " to " + request.getMaxLat() + "," + request.getMaxLon());
 
         try {
+            System.out.println("[OverpassService] 开始调用 Overpass API...");
             // 调用 Overpass API
             HttpHeaders headers = new HttpHeaders();
             headers.setContentType(org.springframework.http.MediaType.APPLICATION_FORM_URLENCODED);
@@ -58,19 +70,23 @@ public class OverpassService {
             ResponseEntity<String> response = restTemplate.postForEntity(
                 OVERPASS_API_URL, entity, String.class
             );
+            System.out.println("[OverpassService] Overpass API 响应状态码：" + response.getStatusCode());
 
             if (response.getStatusCode() == HttpStatus.OK) {
                 // 转换为 GeoJSON
                 String geojson = convertToGeoJSON(response.getBody());
+                System.out.println("[OverpassService] GeoJSON 转换完成，长度：" + (geojson != null ? geojson.length() : "null"));
 
                 // 保存到文件
                 String filename = saveGeoJSON(geojson, request.getName());
+                System.out.println("[OverpassService] 文件已保存：" + filename);
 
                 return filename;
             } else {
                 throw new RuntimeException("Overpass API 请求失败：" + response.getStatusCode());
             }
         } catch (Exception e) {
+            System.err.println("[OverpassService] 下载失败：" + e.getMessage());
             e.printStackTrace();
             throw new RuntimeException("下载路网数据失败：" + e.getMessage());
         }
@@ -114,6 +130,14 @@ public class OverpassService {
         JsonNode root = objectMapper.readTree(overpassResponse);
         JsonNode elements = root.path("elements");
 
+        // 先构建节点 ID 到坐标的映射
+        Map<Long, JsonNode> nodeMap = new HashMap<>();
+        for (JsonNode element : elements) {
+            if ("node".equals(element.path("type").asText())) {
+                nodeMap.put(element.path("id").asLong(), element);
+            }
+        }
+
         Map<String, Object> geojson = new HashMap<>();
         geojson.put("type", "FeatureCollection");
         geojson.put("crs", Map.of("type", "name", "properties", Map.of("name", "EPSG:4326")));
@@ -124,7 +148,7 @@ public class OverpassService {
             String type = element.path("type").asText();
 
             if ("way".equals(type)) {
-                Map<String, Object> feature = parseWay(element);
+                Map<String, Object> feature = parseWay(element, nodeMap);
                 if (feature != null) {
                     features.add(feature);
                 }
@@ -144,7 +168,7 @@ public class OverpassService {
     /**
      * 解析 Way（道路段）
      */
-    private Map<String, Object> parseWay(JsonNode wayNode) {
+    private Map<String, Object> parseWay(JsonNode wayNode, Map<Long, JsonNode> nodeMap) {
         long id = wayNode.path("id").asLong();
         JsonNode tags = wayNode.path("tags");
         JsonNode nodes = wayNode.path("nodes");
@@ -162,8 +186,13 @@ public class OverpassService {
         // 构建几何坐标
         List<List<Double>> coordinates = new ArrayList<>();
         for (JsonNode nodeId : nodes) {
-            // 需要从 nodes 数组中查找对应的节点坐标
-            // 这里简化处理，实际需要在完整响应中查找节点
+            long nid = nodeId.asLong();
+            JsonNode node = nodeMap.get(nid);
+            if (node != null) {
+                double lon = node.path("lon").asDouble();
+                double lat = node.path("lat").asDouble();
+                coordinates.add(List.of(lon, lat));
+            }
         }
 
         if (coordinates.isEmpty()) {
