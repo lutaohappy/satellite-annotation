@@ -184,8 +184,9 @@ public class TruckAnalysisController {
             TruckAnalysisRequest saved = analysisService.saveAnalysis(request, currentUser);
             SavedAnalysisDTO result = SavedAnalysisDTO.fromEntity(saved);
 
-            // 设置路段数据（从请求中直接获取，不存储到数据库）
-            if (request.getRoadSegments() != null) {
+            // 路段数据已存储到数据库，fromEntity 会自动加载
+            // 如果数据库中没有，使用请求中的数据作为备选
+            if (result.getRoadSegments() == null && request.getRoadSegments() != null) {
                 result.setRoadSegments(request.getRoadSegments());
             }
 

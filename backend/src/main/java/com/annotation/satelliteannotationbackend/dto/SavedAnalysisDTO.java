@@ -235,6 +235,20 @@ public class SavedAnalysisDTO {
             }
         }
 
+        // 解析路段列表 JSON
+        if (entity.getRoadSegments() != null) {
+            try {
+                ObjectMapper mapper = new ObjectMapper();
+                List<RoadSegmentDTO> roadSegments = mapper.readValue(
+                    entity.getRoadSegments(),
+                    new TypeReference<List<RoadSegmentDTO>>() {}
+                );
+                dto.setRoadSegments(roadSegments);
+            } catch (Exception e) {
+                // 忽略解析错误
+            }
+        }
+
         return dto;
     }
 
@@ -276,6 +290,16 @@ public class SavedAnalysisDTO {
             try {
                 ObjectMapper mapper = new ObjectMapper();
                 entity.setTurnPoints(mapper.writeValueAsString(request.getTurnPoints()));
+            } catch (Exception e) {
+                // 忽略序列化错误
+            }
+        }
+
+        // 保存路段列表为 JSON
+        if (request.getRoadSegments() != null) {
+            try {
+                ObjectMapper mapper = new ObjectMapper();
+                entity.setRoadSegments(mapper.writeValueAsString(request.getRoadSegments()));
             } catch (Exception e) {
                 // 忽略序列化错误
             }

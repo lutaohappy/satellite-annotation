@@ -64,6 +64,9 @@ public class TruckAnalysisRequest {
     @Column(name = "turn_points", columnDefinition = "TEXT")
     private String turnPoints;        // 转弯点 JSON
 
+    @Column(name = "road_segments", columnDefinition = "TEXT")
+    private String roadSegments;      // 路段列表 JSON
+
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "road_network_id")
     @JsonIgnoreProperties({"hibernateLazyInitializer", "handler"})
@@ -210,6 +213,14 @@ public class TruckAnalysisRequest {
 
     public void setTurnPoints(String turnPoints) {
         this.turnPoints = turnPoints;
+    }
+
+    public String getRoadSegments() {
+        return roadSegments;
+    }
+
+    public void setRoadSegments(String roadSegments) {
+        this.roadSegments = roadSegments;
     }
 
     public RoadNetwork getRoadNetwork() {
