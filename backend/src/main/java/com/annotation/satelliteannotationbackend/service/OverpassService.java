@@ -3,6 +3,7 @@ package com.annotation.satelliteannotationbackend.service;
 import com.annotation.satelliteannotationbackend.dto.DownloadNetworkRequest;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.*;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestTemplate;
@@ -26,8 +27,12 @@ import java.util.Map;
 @Service
 public class OverpassService {
 
+    private static final String DATA_DIR_RELATIVE = "data/road_networks/";
+
+    @Value("${road-network.data-dir:}")
+    private String dataDir;
+
     private static final String OVERPASS_API_URL = "https://overpass-api.de/api/interpreter";
-    private static final String DATA_DIR = "data/road_networks/";
 
     private final RestTemplate restTemplate;
     private final ObjectMapper objectMapper;
@@ -254,13 +259,14 @@ public class OverpassService {
      * 保存 GeoJSON 到文件
      */
     private String saveGeoJSON(String geojson, String name) throws IOException {
-        // 创建目录
-        Path dir = Paths.get(DATA_DIR);
+        // 使用配置的目录，如果没有配置则使用相对路径
+        String dirPath = dataDir != null && !dataDir.isEmpty() ? dataDir : DATA_DIR_RELATIVE;
+        Path dir = Paths.get(dirPath);
         if (!Files.exists(dir)) {
             Files.createDirectories(dir);
         }
 
-        // 生成文件名
+        // 生成文件名（只返回文件名，不包含路径）
         String filename = System.currentTimeMillis() + "_" +
                          name.replaceAll("[^a-zA-Z0-9]", "_") + ".geojson";
         Path filePath = dir.resolve(filename);
@@ -270,7 +276,7 @@ public class OverpassService {
             writer.write(geojson);
         }
 
-        return filePath.toString();
+        return filename;  // 只返回文件名
     }
 
     /**

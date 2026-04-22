@@ -150,12 +150,17 @@ public class RoadNetworkService {
         return networkRepository.findById(id)
             .map(network -> {
                 System.out.println("[RoadNetworkService] Found network: " + network.getName());
-                System.out.println("[RoadNetworkService] Stored path (relative): " + network.getGeojsonPath());
+                System.out.println("[RoadNetworkService] Stored path: " + network.getGeojsonPath());
                 return network;
             })
             .map(RoadNetwork::getGeojsonPath)
             .map(storedPath -> {
-                // 如果存储的是相对路径，拼接配置的根目录
+                // 如果存储的路径包含 data/road_networks/前缀，去掉它
+                if (storedPath != null && storedPath.startsWith("data/road_networks/")) {
+                    storedPath = storedPath.substring("data/road_networks/".length());
+                    System.out.println("[RoadNetworkService] Stripped path to: " + storedPath);
+                }
+                // 拼接配置的根目录
                 if (storedPath != null && !storedPath.startsWith("/")) {
                     String fullPath = dataDir + storedPath;
                     System.out.println("[RoadNetworkService] Full path: " + fullPath);

@@ -26,6 +26,10 @@ image:
   tile-dir: /opt/uploads/tiles/
   max-size: 1073741824
 
+# 路网数据配置
+road-network:
+  data-dir: /opt/satellite-annotation/data/road_networks/
+
 logging:
   level:
     root: INFO
