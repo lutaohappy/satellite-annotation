@@ -328,7 +328,7 @@
               <el-button type="primary" size="small" @click="startSelectPoints" :disabled="selectMode">
                 <el-icon><Location /></el-icon> 打点选择起点终点
               </el-button>
-              <el-button type="success" size="small" @click="showSavedList" :disabled="!hasAnalysisRecords">
+              <el-button type="success" size="small" @click="showSavedList">
                 <el-icon><Folder /></el-icon> 查看历史
               </el-button>
               <el-button size="small" @click="clearAnalysis" :disabled="!hasAnalysisRecords">
@@ -439,7 +439,10 @@
 
             <!-- 查看历史对话框 -->
             <el-dialog v-model="showHistoryDialog" title="分析历史" width="700px">
-              <el-table :data="analysisHistory" style="width: 100%" max-height="400" v-loading="loadingHistory">
+              <div v-if="analysisHistory.length === 0 && !loadingHistory" class="empty-tip">
+                暂无分析历史记录
+              </div>
+              <el-table v-else :data="analysisHistory" style="width: 100%" max-height="400" v-loading="loadingHistory">
                 <el-table-column prop="requestName" label="名称" />
                 <el-table-column prop="startPoint" label="起点" width="100" />
                 <el-table-column prop="endPoint" label="终点" width="100" />
@@ -470,7 +473,10 @@
               <el-button type="primary" size="small" @click="loadSavedList" style="margin-bottom: 10px">
                 <el-icon><Refresh /></el-icon> 刷新列表
               </el-button>
-              <el-table :data="savedAnalysisList" style="width: 100%" max-height="400" v-loading="loadingSaved">
+              <div v-if="savedAnalysisList.length === 0 && !loadingSaved" class="empty-tip">
+                暂无已保存的分析记录
+              </div>
+              <el-table v-else :data="savedAnalysisList" style="width: 100%" max-height="400" v-loading="loadingSaved">
                 <el-table-column prop="name" label="名称" />
                 <el-table-column prop="startPoint" label="起点" width="100" />
                 <el-table-column prop="endPoint" label="终点" width="100" />
