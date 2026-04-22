@@ -20,6 +20,7 @@ public class SavedAnalysisRequestDTO {
     private List<ViolationPointDTO> violations;
     private Double totalDistance;
     private Double estimatedTime;
+    private List<RoadSegmentDTO> roadSegments;  // 路段列表
 
     // Getters and Setters
 
@@ -125,5 +126,13 @@ public class SavedAnalysisRequestDTO {
 
     public void setEstimatedTime(Double estimatedTime) {
         this.estimatedTime = estimatedTime;
+    }
+
+    public List<RoadSegmentDTO> getRoadSegments() {
+        return roadSegments;
+    }
+
+    public void setRoadSegments(List<RoadSegmentDTO> roadSegments) {
+        this.roadSegments = roadSegments;
     }
 }

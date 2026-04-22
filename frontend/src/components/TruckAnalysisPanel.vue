@@ -510,6 +510,7 @@ const autoSaveRecord = async (analysisData) => {
       routeGeoJson: analysisData.routeGeoJson,
       turnPoints: analysisData.turnPoints,
       violations: analysisData.violations,
+      roadSegments: analysisData.roadSegments,  // 添加路段数据
       totalDistance: analysisData.totalDistance,
       estimatedTime: analysisData.estimatedTime
     }
@@ -543,6 +544,7 @@ const saveResult = async () => {
       routeGeoJson: analysisResult.value.routeGeoJson,
       turnPoints: analysisResult.value.turnPoints,
       violations: analysisResult.value.violations,
+      roadSegments: analysisResult.value.roadSegments,  // 添加路段数据
       totalDistance: analysisResult.value.totalDistance,
       estimatedTime: analysisResult.value.estimatedTime
     }

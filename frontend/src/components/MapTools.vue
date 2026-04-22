@@ -481,10 +481,17 @@
                 <el-table-column prop="startPoint" label="起点" width="100" />
                 <el-table-column prop="endPoint" label="终点" width="100" />
                 <el-table-column prop="createdAt" label="保存时间" width="160" />
-                <el-table-column label="操作" width="180" fixed="right">
+                <el-table-column label="操作" width="250" fixed="right">
                   <template #default="scope">
                     <el-button
                       type="primary"
+                      size="small"
+                      @click="viewSavedDetail(scope.row)"
+                    >
+                      详情
+                    </el-button>
+                    <el-button
+                      type="success"
                       size="small"
                       @click="loadSavedResult(scope.row)"
                     >
@@ -500,6 +507,119 @@
                   </template>
                 </el-table-column>
               </el-table>
+            </el-dialog>
+
+            <!-- 已保存分析详情对话框 -->
+            <el-dialog v-model="showSavedDetailDialog" title="分析详情" width="900px" class="analysis-detail-dialog">
+              <div v-if="currentSavedDetail" class="detail-content">
+                <!-- 基本信息 -->
+                <div class="detail-section">
+                  <h4 class="detail-title">基本信息</h4>
+                  <div class="info-grid">
+                    <div class="info-item"><span class="label">名称：</span><span>{{ currentSavedDetail.name }}</span></div>
+                    <div class="info-item"><span class="label">起点：</span><span>{{ currentSavedDetail.startPoint }}</span></div>
+                    <div class="info-item"><span class="label">终点：</span><span>{{ currentSavedDetail.endPoint }}</span></div>
+                    <div class="info-item"><span class="label">时间：</span><span>{{ currentSavedDetail.createdAt }}</span></div>
+                  </div>
+                </div>
+
+                <!-- 货车参数 -->
+                <div class="detail-section">
+                  <h4 class="detail-title">货车参数</h4>
+                  <div class="info-grid">
+                    <div class="info-item"><span class="label">车长：</span><span>{{ currentSavedDetail.truckParams?.length }}m</span></div>
+                    <div class="info-item"><span class="label">车宽：</span><span>{{ currentSavedDetail.truckParams?.width }}m</span></div>
+                    <div class="info-item"><span class="label">车高：</span><span>{{ currentSavedDetail.truckParams?.height }}m</span></div>
+                    <div class="info-item"><span class="label">总重：</span><span>{{ currentSavedDetail.truckParams?.weight }}吨</span></div>
+                    <div class="info-item"><span class="label">轴距：</span><span>{{ currentSavedDetail.truckParams?.wheelbase }}m</span></div>
+                  </div>
+                </div>
+
+                <!-- 分析结果 -->
+                <div class="detail-section">
+                  <el-alert
+                    :type="currentSavedDetail.isPassable ? 'success' : 'error'"
+                    :title="currentSavedDetail.isPassable ? '可以通过' : '存在禁行路段'"
+                    :closable="false"
+                    show-icon
+                  />
+                </div>
+
+                <!-- 转弯点列表 -->
+                <div v-if="currentSavedDetail.turnPoints && currentSavedDetail.turnPoints.length > 0" class="detail-section">
+                  <h4 class="detail-title">转弯点列表 ({{ currentSavedDetail.turnPoints.length }} 个)</h4>
+                  <el-table :data="currentSavedDetail.turnPoints" size="small" :max-height="300">
+                    <el-table-column prop="sequence" label="序号" width="60" />
+                    <el-table-column prop="instruction" label="转向说明" />
+                    <el-table-column label="角度" width="80">
+                      <template #default="scope">
+                        <span :class="{ 'sharp-turn': scope.row.isSharpTurn }">{{ scope.row.turnAngle?.toFixed(1) }}°</span>
+                      </template>
+                    </el-table-column>
+                    <el-table-column label="半径" width="90">
+                      <template #default="scope">
+                        <span :class="{ 'sharp-turn': scope.row.turnRadius && scope.row.turnRadius < (currentSavedDetail.truckParams?.wheelbase / 0.574) }">
+                          {{ scope.row.turnRadius?.toFixed(1) }}m
+                        </span>
+                      </template>
+                    </el-table-column>
+                  </el-table>
+                </div>
+
+                <!-- 禁行点列表 -->
+                <div v-if="currentSavedDetail.violations && currentSavedDetail.violations.length > 0" class="detail-section">
+                  <h4 class="detail-title">禁行点列表 ({{ currentSavedDetail.violations.length }} 处)</h4>
+                  <el-table :data="currentSavedDetail.violations" size="small" :max-height="300">
+                    <el-table-column prop="reason" label="原因" width="120" />
+                    <el-table-column prop="detail" label="详情" show-overflow-tooltip />
+                    <el-table-column label="位置" width="150">
+                      <template #default="scope">
+                        <span v-if="scope.row.lat && scope.row.lon">
+                          {{ scope.row.lat.toFixed(4) }}, {{ scope.row.lon.toFixed(4) }}
+                        </span>
+                        <span v-else>-</span>
+                      </template>
+                    </el-table-column>
+                  </el-table>
+                </div>
+
+                <!-- 路段列表 -->
+                <div v-if="currentSavedDetail.roadSegments && currentSavedDetail.roadSegments.length > 0" class="detail-section">
+                  <h4 class="detail-title">路段列表 ({{ currentSavedDetail.roadSegments.length }} 段)</h4>
+                  <el-table :data="currentSavedDetail.roadSegments" size="small" :max-height="300">
+                    <el-table-column prop="sequence" label="序号" width="60" />
+                    <el-table-column prop="name" label="路段名称" min-width="120" show-overflow-tooltip />
+                    <el-table-column label="距离/用时" width="100">
+                      <template #default="scope">
+                        <div v-if="scope.row.distance">
+                          {{ (scope.row.distance / 1000).toFixed(2) }}km
+                          <br>
+                          <span style="font-size: 11px; color: #999;">{{ Math.round(scope.row.duration || 0) }}s</span>
+                        </div>
+                      </template>
+                    </el-table-column>
+                    <el-table-column prop="instruction" label="导航指示" min-width="150" show-overflow-tooltip />
+                    <el-table-column label="属性" width="150">
+                      <template #default="scope">
+                        <div class="segment-properties">
+                          <span v-if="scope.row.restrictions" class="restriction">
+                            {{ scope.row.restrictions }}
+                          </span>
+                          <span v-if="scope.row.roadMode === 'ferry'" class="restriction">
+                            轮渡路段
+                          </span>
+                          <span v-if="scope.row.bearingBefore">
+                            方位：{{ Math.round(scope.row.bearingBefore) }}°
+                          </span>
+                        </div>
+                      </template>
+                    </el-table-column>
+                  </el-table>
+                </div>
+              </div>
+              <template #footer>
+                <el-button @click="showSavedDetailDialog = false">关闭</el-button>
+              </template>
             </el-dialog>
           </div>
         </div>
@@ -579,8 +699,10 @@ const truckParams = ref({
 // 历史分析相关
 const showHistoryDialog = ref(false)
 const showSavedListDialog = ref(false)
+const showSavedDetailDialog = ref(false)
 const analysisHistory = ref([])
 const savedAnalysisList = ref([])
+const currentSavedDetail = ref(null)
 const loadingHistory = ref(false)
 const loadingSaved = ref(false)
 
@@ -1695,9 +1817,6 @@ const loadHistoryResult = (record) => {
 // 加载已保存结果
 const loadSavedResult = async (item) => {
   try {
-    // 恢复表单数据
-    const currentRecord = analysisRecords.value.find(r => r.id === currentRecordId.value)
-
     // 恢复货车参数
     if (item.truckParams) {
       truckParams.value = item.truckParams
@@ -1722,6 +1841,12 @@ const loadSavedResult = async (item) => {
     console.error('[MapTools] 加载结果失败:', error)
     ElMessage.error('加载失败：' + error.message)
   }
+}
+
+// 查看已保存详情
+const viewSavedDetail = (item) => {
+  currentSavedDetail.value = item
+  showSavedDetailDialog.value = true
 }
 
 // 删除已保存的结果
@@ -2138,5 +2263,69 @@ defineExpose({
 .network-actions {
   display: flex;
   gap: 4px;
+}
+
+/* 货车分析详情对话框样式 */
+.analysis-detail-dialog {
+  .detail-content {
+    max-height: 600px;
+    overflow-y: auto;
+    padding: 0 10px;
+  }
+
+  .detail-section {
+    margin-bottom: 20px;
+    padding-bottom: 20px;
+    border-bottom: 1px solid #eee;
+
+    &:last-child {
+      border-bottom: none;
+    }
+  }
+
+  .detail-title {
+    margin: 0 0 10px;
+    font-size: 14px;
+    color: #606266;
+    font-weight: 500;
+  }
+
+  .info-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+    gap: 10px;
+  }
+
+  .info-item {
+    display: flex;
+    gap: 8px;
+    font-size: 14px;
+
+    .label {
+      color: #606266;
+      font-weight: 500;
+    }
+
+    .value {
+      color: #333;
+    }
+  }
+
+  .sharp-turn {
+    color: #f56c6c;
+    font-weight: 600;
+  }
+
+  .segment-properties {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    font-size: 12px;
+
+    .restriction {
+      color: #f56c6c;
+      font-weight: 500;
+    }
+  }
 }
 </style>

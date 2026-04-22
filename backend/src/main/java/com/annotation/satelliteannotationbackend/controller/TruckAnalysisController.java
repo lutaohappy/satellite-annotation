@@ -184,6 +184,11 @@ public class TruckAnalysisController {
             TruckAnalysisRequest saved = analysisService.saveAnalysis(request, currentUser);
             SavedAnalysisDTO result = SavedAnalysisDTO.fromEntity(saved);
 
+            // 设置路段数据（从请求中直接获取，不存储到数据库）
+            if (request.getRoadSegments() != null) {
+                result.setRoadSegments(request.getRoadSegments());
+            }
+
             return ResponseEntity.ok(ApiResponse.success(result));
         } catch (Exception e) {
             System.err.println("[TruckAnalysisController] 保存失败：" + e.getMessage());

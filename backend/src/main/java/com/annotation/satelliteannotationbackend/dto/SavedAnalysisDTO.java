@@ -28,6 +28,7 @@ public class SavedAnalysisDTO {
     private Double totalDistance;
     private Double estimatedTime;
     private Boolean isPassable;
+    private List<RoadSegmentDTO> roadSegments;  // 路段列表
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
 
@@ -167,6 +168,14 @@ public class SavedAnalysisDTO {
 
     public void setUpdatedAt(LocalDateTime updatedAt) {
         this.updatedAt = updatedAt;
+    }
+
+    public List<RoadSegmentDTO> getRoadSegments() {
+        return roadSegments;
+    }
+
+    public void setRoadSegments(List<RoadSegmentDTO> roadSegments) {
+        this.roadSegments = roadSegments;
     }
 
     /**
