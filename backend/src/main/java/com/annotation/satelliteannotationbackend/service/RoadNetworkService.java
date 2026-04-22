@@ -9,6 +9,7 @@ import com.annotation.satelliteannotationbackend.enums.TaskStatus;
 import com.annotation.satelliteannotationbackend.repository.RoadNetworkRepository;
 import com.annotation.satelliteannotationbackend.repository.RoadNetworkTaskRepository;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -31,6 +32,9 @@ public class RoadNetworkService {
     private final OverpassService overpassService;
     private final RoadNetworkTaskRepository taskRepository;
     private final ObjectMapper objectMapper;
+
+    @Value("${road-network.data-dir:}")
+    private String dataDir;
 
     public RoadNetworkService(
             RoadNetworkRepository networkRepository,
@@ -141,13 +145,35 @@ public class RoadNetworkService {
      * 获取路网的 GeoJSON
      */
     public String findGeoJsonById(Long id) {
+        System.out.println("[RoadNetworkService] findGeoJsonById: " + id);
+        System.out.println("[RoadNetworkService] Configured data-dir: " + dataDir);
         return networkRepository.findById(id)
+            .map(network -> {
+                System.out.println("[RoadNetworkService] Found network: " + network.getName());
+                System.out.println("[RoadNetworkService] Stored path (relative): " + network.getGeojsonPath());
+                return network;
+            })
             .map(RoadNetwork::getGeojsonPath)
-            .filter(path -> Files.exists(Paths.get(path)))
+            .map(storedPath -> {
+                // 如果存储的是相对路径，拼接配置的根目录
+                if (storedPath != null && !storedPath.startsWith("/")) {
+                    String fullPath = dataDir + storedPath;
+                    System.out.println("[RoadNetworkService] Full path: " + fullPath);
+                    return fullPath;
+                }
+                return storedPath;
+            })
+            .filter(path -> {
+                boolean exists = Files.exists(Paths.get(path));
+                System.out.println("[RoadNetworkService] File exists: " + exists + " for path: " + path);
+                return exists;
+            })
             .map(path -> {
                 try {
                     return Files.readString(Paths.get(path));
                 } catch (IOException e) {
+                    System.err.println("[RoadNetworkService] Failed to read file: " + path);
+                    e.printStackTrace();
                     return null;
                 }
             })

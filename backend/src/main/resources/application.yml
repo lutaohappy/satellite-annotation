@@ -45,6 +45,10 @@ image:
   tile-dir: /Users/taolu/Downloads/test/satellite-annotation/backend/uploads/tiles/
   max-size: 1073741824  # 1GB
 
+# 路网数据配置
+road-network:
+  data-dir: /Users/taolu/Downloads/test/satellite-annotation/backend/data/road_networks/
+
 # 日志配置
 logging:
   level:
@@ -75,6 +79,10 @@ jwt:
 image:
   upload-dir: /opt/uploads/images/
   tile-dir: /opt/uploads/tiles/
+
+# 路网数据配置
+road-network:
+  data-dir: /opt/satellite-annotation/data/road_networks/
 
 server:
   port: 4000
