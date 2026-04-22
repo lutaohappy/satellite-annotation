@@ -217,7 +217,7 @@ import { getRoadNetworks } from '@/api/roadNetwork'
 import { Location, Delete, Refresh } from '@element-plus/icons-vue'
 
 // 版本号
-const BUILD_VERSION = 'v3.0 (20260421-45-保存分析详情)'
+const BUILD_VERSION = 'v3.0 (20260421-46-路段综合详情)'
 console.log('[MapView] 当前版本:', BUILD_VERSION)
 console.log('%c [Map] 当前版本:', 'background: #f00; color: #fff; font-size: 16px;', BUILD_VERSION)
 console.log('%c [Map] 双层地图架构：底层 (底图 + 影像) + 上层 (矢量标注)', 'background: #00f; color: #fff; font-size: 14px;')
