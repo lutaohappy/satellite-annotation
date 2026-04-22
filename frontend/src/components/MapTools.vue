@@ -548,56 +548,44 @@
                 <!-- 路段详情列表 -->
                 <div v-if="currentSavedDetail.roadSegments && currentSavedDetail.roadSegments.length > 0" class="detail-section">
                   <h4 class="detail-title">路段详情列表 ({{ currentSavedDetail.roadSegments.length }} 段)</h4>
-                  <el-table :data="mergedRoadSegments" size="small" :max-height="500" stripe>
-                    <el-table-column prop="sequence" label="序号" width="60" />
-                    <el-table-column label="路段信息" min-width="180">
+                  <el-table :data="mergedRoadSegments" size="small" :max-height="500" stripe class="road-segment-table">
+                    <el-table-column label="路段名称" width="120">
                       <template #default="scope">
-                        <div class="road-segment-info">
-                          <div class="segment-name">{{ scope.row.name || '无名路段' }}</div>
-                          <div class="segment-coords">
-                            <span class="coord-start">起：{{ scope.row.startLat?.toFixed(4) || '-' }}, {{ scope.row.startLon?.toFixed(4) || '-' }}</span>
-                            <span class="coord-end">止：{{ scope.row.endLat?.toFixed(4) || '-' }}, {{ scope.row.endLon?.toFixed(4) || '-' }}</span>
-                          </div>
+                        <span class="segment-name-cell">{{ scope.row.name || '无名路段' }}</span>
+                      </template>
+                    </el-table-column>
+                    <el-table-column label="起止坐标" min-width="220">
+                      <template #default="scope">
+                        <div class="coord-cell">
+                          <div class="coord-start">起：{{ scope.row.startLat?.toFixed(6) || '-' }}, {{ scope.row.startLon?.toFixed(6) || '-' }}</div>
+                          <div class="coord-end">止：{{ scope.row.endLat?.toFixed(6) || '-' }}, {{ scope.row.endLon?.toFixed(6) || '-' }}</div>
                         </div>
                       </template>
                     </el-table-column>
-                    <el-table-column label="导航属性" min-width="120">
+                    <el-table-column label="转弯半径&角度" width="130">
                       <template #default="scope">
-                        <div class="navigation-info">
-                          <div class="nav-instruction">{{ scope.row.instruction || '-' }}</div>
-                          <div class="nav-distance">{{ (scope.row.distance || 0) / 1000 }}km / {{ Math.round(scope.row.duration || 0) }}s</div>
+                        <div v-if="scope.row.turnPoint" class="turn-info">
+                          {{ scope.row.turnPoint.turnRadius?.toFixed(1) || '-' }}m / {{ scope.row.turnPoint.turnAngle?.toFixed(1) || '0' }}°
                         </div>
+                        <span v-else class="text-muted">直行</span>
                       </template>
                     </el-table-column>
-                    <el-table-column label="转弯点信息" width="110">
+                    <el-table-column label="通过属性" min-width="120">
                       <template #default="scope">
-                        <div v-if="scope.row.turnPoint" :class="{ 'sharp-turn': scope.row.turnPoint.isSharpTurn }">
-                          <div>{{ scope.row.turnPoint.instruction || '直行' }}</div>
-                          <div class="turn-detail">
-                            {{ scope.row.turnPoint.turnAngle?.toFixed(1) || '0' }}° /
-                            <span :class="{ 'text-danger': scope.row.turnPoint.turnRadius && scope.row.turnPoint.turnRadius < minTurningRadius }">
-                              {{ scope.row.turnPoint.turnRadius?.toFixed(1) || '-' }}m
-                            </span>
-                          </div>
-                        </div>
-                        <span v-else class="text-muted">-</span>
-                      </template>
-                    </el-table-column>
-                    <el-table-column label="禁行信息" min-width="100">
-                      <template #default="scope">
-                        <div v-if="scope.row.violation">
+                        <div v-if="scope.row.violation" class="violation-reason">
                           <el-tag type="danger" size="small">{{ scope.row.violation.reason }}</el-tag>
-                          <div class="violation-detail">{{ scope.row.violation.detail }}</div>
                         </div>
                         <el-tag v-else type="success" size="small">可通过</el-tag>
                       </template>
                     </el-table-column>
-                    <el-table-column label="距离/方位" width="90">
+                    <el-table-column label="导航属性" min-width="120">
                       <template #default="scope">
-                        <div v-if="scope.row.bearingBefore" class="bearing-info">
-                          {{ Math.round(scope.row.bearingBefore) }}°→{{ Math.round(scope.row.bearingAfter) }}°
-                        </div>
-                        <span v-else class="text-muted">-</span>
+                        <div class="nav-instruction-cell">{{ scope.row.instruction || '-' }}</div>
+                      </template>
+                    </el-table-column>
+                    <el-table-column label="路长" width="90">
+                      <template #default="scope">
+                        <span class="distance-cell">{{ ((scope.row.distance || 0) / 1000).toFixed(2) }}km</span>
                       </template>
                     </el-table-column>
                   </el-table>
@@ -742,19 +730,6 @@ const mergedRoadSegments = computed(() => {
   const roadSegments = currentSavedDetail.value.roadSegments || []
   const turnPoints = currentSavedDetail.value.turnPoints || []
   const violations = currentSavedDetail.value.violations || []
-
-  // 根据坐标匹配转弯点到路段
-  const turnPointMap = new Map()
-  turnPoints.forEach((tp, index) => {
-    // 转弯点通常在一个路段的终点
-    turnPointMap.set(index + 1, tp)  // 按序号映射
-  })
-
-  // 根据坐标匹配禁行点到路段
-  const violationMap = new Map()
-  violations.forEach((v, index) => {
-    violationMap.set(index, v)
-  })
 
   return roadSegments.map((segment, index) => {
     // 查找该路段终点附近的转弯点
@@ -2402,63 +2377,52 @@ defineExpose({
   }
 
   /* 路段详情表格样式 */
-  .road-segment-info {
+  .road-segment-table {
+    font-size: 13px;
+  }
+
+  .segment-name-cell {
+    font-weight: 500;
+    color: #333;
+  }
+
+  .coord-cell {
     display: flex;
     flex-direction: column;
-    gap: 4px;
-
-    .segment-name {
-      font-weight: 500;
-      color: #333;
-      font-size: 14px;
-    }
-
-    .segment-coords {
-      display: flex;
-      gap: 10px;
-      font-size: 11px;
-
-      .coord-start {
-        color: #67c23a;
-      }
-
-      .coord-end {
-        color: #409eff;
-      }
-    }
-  }
-
-  .navigation-info {
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-
-    .nav-instruction {
-      font-size: 13px;
-      color: #606266;
-    }
-
-    .nav-distance {
-      font-size: 11px;
-      color: #909399;
-    }
-  }
-
-  .turn-detail {
+    gap: 2px;
     font-size: 11px;
-    color: #909399;
-    margin-top: 2px;
+
+    .coord-start {
+      color: #67c23a;
+    }
+
+    .coord-end {
+      color: #409eff;
+    }
   }
 
-  .violation-detail {
-    font-size: 11px;
-    color: #f56c6c;
-    margin-top: 2px;
-  }
-
-  .bearing-info {
+  .turn-info {
     font-size: 12px;
-    color: #909399;
+    color: #606266;
+  }
+
+  .violation-reason {
+    font-size: 12px;
+  }
+
+  .nav-instruction-cell {
+    font-size: 12px;
+    color: #606266;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 200px;
+  }
+
+  .distance-cell {
+    font-size: 12px;
+    color: #409eff;
+    font-weight: 500;
   }
 
   .text-muted {
