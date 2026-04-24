@@ -111,6 +111,19 @@ public class TruckAnalysisController {
                 result.setTurnPoints(List.of());
             }
 
+            // 解析路段列表 JSON
+            try {
+                if (request.getRoadSegments() != null) {
+                    List<RoadSegmentDTO> roadSegments = mapper.readValue(
+                        request.getRoadSegments(),
+                        mapper.getTypeFactory().constructCollectionType(List.class, RoadSegmentDTO.class)
+                    );
+                    result.setRoadSegments(roadSegments);
+                }
+            } catch (Exception e) {
+                System.err.println("[TruckAnalysisController] 解析路段数据失败：" + e.getMessage());
+            }
+
             return ResponseEntity.ok(ApiResponse.success(result));
         } catch (Exception e) {
             return ResponseEntity.internalServerError()

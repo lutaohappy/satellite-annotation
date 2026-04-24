@@ -96,3 +96,14 @@ export function deleteSavedAnalysis(id) {
     method: 'delete'
   })
 }
+
+/**
+ * 获取已保存的分析详情
+ */
+export function getSavedAnalysisDetail(id) {
+  console.log('[TruckAnalysis API] 获取已保存的分析详情:', id)
+  return request({
+    url: `/api/truck-analysis/saved/${id}`,
+    method: 'get'
+  })
+}

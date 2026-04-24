@@ -81,34 +81,7 @@ public class TruckAnalysisService {
             TruckParametersDTO truck = request.getTruck();
             List<ViolationPointDTO> violations = analyzePassability(bestRoute, truck, constraints, turnPoints);
 
-            // 5. 保存分析结果
-            TruckAnalysisRequest analysisRequest = new TruckAnalysisRequest();
-            analysisRequest.setRequestName(request.getRequestName());
-            analysisRequest.setStartLat(request.getStartLat());
-            analysisRequest.setStartLon(request.getStartLon());
-            analysisRequest.setEndLat(request.getEndLat());
-            analysisRequest.setEndLon(request.getEndLon());
-            analysisRequest.setTruckLength(truck.getLength());
-            analysisRequest.setTruckWidth(truck.getWidth());
-            analysisRequest.setTruckHeight(truck.getHeight());
-            analysisRequest.setTruckWeight(truck.getWeight());
-            analysisRequest.setTruckAxleWeight(truck.getAxleWeight());
-            analysisRequest.setWheelbase(truck.getWheelbase());
-            analysisRequest.setRouteGeoJson(routeGeoJson);
-            analysisRequest.setIsPassable(violations.isEmpty());
-            analysisRequest.setViolationPoints(objectMapper.writeValueAsString(violations));
-            analysisRequest.setTurnPoints(objectMapper.writeValueAsString(turnPoints));
-            analysisRequest.setCreatedBy(currentUser);
-
-            if (request.getRoadNetworkId() != null) {
-                RoadNetwork network = new RoadNetwork();
-                network.setId(request.getRoadNetworkId());
-                analysisRequest.setRoadNetwork(network);
-            }
-
-            analysisRepository.save(analysisRequest);
-
-            // 6. 返回结果
+            // 5. 返回结果（不再自动保存，由前端决定是否保存）
             if (violations.isEmpty()) {
                 return AnalysisResultDTO.passable(routeGeoJson, totalDistance, estimatedTime, turnPoints, roadSegments);
             } else {
@@ -574,13 +547,28 @@ public class TruckAnalysisService {
     }
 
     /**
-     * 保存分析结果
+     * 保存分析结果（支持新增和更新）
      */
     @Transactional
     public TruckAnalysisRequest saveAnalysis(SavedAnalysisRequestDTO request, User currentUser) {
-        TruckAnalysisRequest entity = SavedAnalysisDTO.toEntity(request, currentUser.getId());
-        entity.setCreatedBy(currentUser);
-        return analysisRepository.save(entity);
+        // 如果有 ID，表示更新操作
+        if (request.getId() != null) {
+            System.out.println("[TruckAnalysisService] 更新记录 ID: " + request.getId());
+            return analysisRepository.findById(request.getId())
+                .map(entity -> {
+                    // 更新现有记录
+                    SavedAnalysisDTO.updateEntity(entity, request);
+                    entity.setCreatedBy(currentUser);
+                    return analysisRepository.save(entity);
+                })
+                .orElseThrow(() -> new RuntimeException("记录不存在：" + request.getId()));
+        } else {
+            // 新增记录
+            System.out.println("[TruckAnalysisService] 创建新记录");
+            TruckAnalysisRequest entity = SavedAnalysisDTO.toEntity(request, currentUser.getId());
+            entity.setCreatedBy(currentUser);
+            return analysisRepository.save(entity);
+        }
     }
 
     /**

@@ -319,124 +319,212 @@
         </div>
       </el-tab-pane>
 
+      <!-- AI Chat Tab -->
+      <el-tab-pane label="AI 助手" name="ai-chat">
+        <div class="tab-content ai-chat-content">
+          <div class="chat-container">
+            <!-- 聊天消息列表 -->
+            <div class="chat-messages" ref="chatMessagesRef">
+              <div
+                v-for="(msg, index) in chatMessages"
+                :key="index"
+                class="chat-message"
+                :class="msg.role"
+              >
+                <div class="message-avatar">
+                  <el-icon v-if="msg.role === 'user'"><User /></el-icon>
+                  <el-icon v-else><Cpu /></el-icon>
+                </div>
+                <div class="message-content">
+                  <div class="message-text">{{ msg.content }}</div>
+                  <div class="message-time">{{ msg.time }}</div>
+                </div>
+              </div>
+              <!-- 加载中显示 -->
+              <div v-if="chatLoading" class="chat-message ai">
+                <div class="message-avatar">
+                  <el-icon><Cpu /></el-icon>
+                </div>
+                <div class="message-content">
+                  <div class="message-text typing">
+                    <span class="typing-dot"></span>
+                    <span class="typing-dot"></span>
+                    <span class="typing-dot"></span>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <!-- 输入区域 -->
+            <div class="chat-input-area">
+              <el-input
+                v-model="chatInput"
+                type="textarea"
+                :rows="3"
+                placeholder="输入问题，按 Enter 发送（Shift+Enter 换行）..."
+                @keydown.enter.exact="handleChatSend"
+                :disabled="chatLoading"
+                class="chat-input"
+              />
+              <div class="chat-input-actions">
+                <el-button
+                  type="primary"
+                  size="small"
+                  @click="handleChatSend"
+                  :disabled="!chatInput.trim() || chatLoading"
+                  :loading="chatLoading"
+                >
+                  发送
+                </el-button>
+                <el-button
+                  size="small"
+                  @click="clearChatHistory"
+                  :disabled="chatMessages.length === 0"
+                >
+                  清空
+                </el-button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </el-tab-pane>
+
       <!-- 货车分析 Tab -->
       <el-tab-pane label="货车分析" name="truck-analysis">
         <div class="tab-content">
           <div class="truck-analysis-section">
-            <!-- 操作按钮 -->
-            <div class="analysis-actions">
-              <el-button type="primary" size="small" @click="startSelectPoints" :disabled="selectMode">
-                <el-icon><Location /></el-icon> 打点选择起点终点
+            <!-- 分析 ID 显示 -->
+            <div v-if="currentAnalysisId" class="analysis-id-bar">
+              <span class="id-label">分析 ID:</span>
+              <span class="id-value">{{ currentAnalysisId }}</span>
+              <el-tag v-if="currentAnalyzingRecord?.saved" type="success" size="small">已保存</el-tag>
+            </div>
+
+            <!-- 记录管理菜单 -->
+            <div class="record-menu">
+              <el-button type="primary" size="small" @click="createAnalysis">
+                <el-icon><Plus /></el-icon> 创建分析
               </el-button>
               <el-button type="success" size="small" @click="showSavedList">
-                <el-icon><Folder /></el-icon> 查看历史
+                <el-icon><Folder /></el-icon> 历史记录
               </el-button>
-              <el-button size="small" @click="clearAnalysis" :disabled="!hasAnalysisRecords">
-                <el-icon><Delete /></el-icon> 清空记录
+              <el-button type="danger" size="small" @click="clearAnalysis">
+                <el-icon><Delete /></el-icon> 清空
               </el-button>
             </div>
 
-            <!-- 货车参数 -->
-            <el-divider>货车参数</el-divider>
-            <el-form label-width="70px" label-position="left" size="small">
-              <el-row :gutter="10">
-                <el-col :span="12">
-                  <el-form-item label="车长 (m)">
-                    <el-input-number v-model="truckParams.length" :min="0" :max="100" :precision="2" :step="0.5" style="width: 100%" />
-                  </el-form-item>
-                </el-col>
-                <el-col :span="12">
-                  <el-form-item label="车宽 (m)">
-                    <el-input-number v-model="truckParams.width" :min="0" :max="10" :precision="2" :step="0.1" style="width: 100%" />
-                  </el-form-item>
-                </el-col>
-              </el-row>
-              <el-row :gutter="10">
-                <el-col :span="12">
-                  <el-form-item label="车高 (m)">
-                    <el-input-number v-model="truckParams.height" :min="0" :max="10" :precision="2" :step="0.1" style="width: 100%" />
-                  </el-form-item>
-                </el-col>
-                <el-col :span="12">
-                  <el-form-item label="总重 (吨)">
-                    <el-input-number v-model="truckParams.weight" :min="0" :max="500" :precision="2" :step="1" style="width: 100%" />
-                  </el-form-item>
-                </el-col>
-              </el-row>
-              <el-form-item label="轴距 (m)">
-                <el-input-number v-model="truckParams.wheelbase" :min="0" :max="50" :precision="2" :step="0.5" style="width: 100%" />
-                <div class="form-tip">最小转弯半径：{{ minTurningRadius.toFixed(1) }}m (公式：R = L / sin(35°))</div>
-              </el-form-item>
-            </el-form>
+            <!-- 编辑操作区（创建分析后显示） -->
+            <div v-if="currentAnalysisId" class="edit-section">
+              <!-- 操作按钮 -->
+              <div class="analysis-actions">
+                <el-button type="info" size="small" @click="startSelectPoints" :disabled="selectMode">
+                  <el-icon><Location /></el-icon> 打点选择起点终点
+                </el-button>
+                <el-button type="warning" size="small" @click="saveCurrentAnalysis" :disabled="!currentAnalyzingRecord || !currentAnalyzingRecord.result || currentAnalyzingRecord.saved">
+                  <el-icon><Download /></el-icon> {{ currentAnalyzingRecord?.saved ? '已保存' : '保存结果' }}
+                </el-button>
+              </div>
 
-            <!-- 状态提示 -->
-            <el-alert
-              v-if="selectMode"
-              title="请在地图上点击选择起点，然后再选择终点"
-              type="info"
-              :closable="false"
-              show-icon
-              style="margin: 10px 0"
-            />
+              <!-- 货车参数 -->
+              <el-divider>货车参数</el-divider>
+              <el-form label-width="70px" label-position="left" size="small">
+                <el-row :gutter="10">
+                  <el-col :span="12">
+                    <el-form-item label="车长 (m)">
+                      <el-input-number v-model="truckParams.length" :min="0" :max="100" :precision="2" :step="0.5" style="width: 100%" />
+                    </el-form-item>
+                  </el-col>
+                  <el-col :span="12">
+                    <el-form-item label="车宽 (m)">
+                      <el-input-number v-model="truckParams.width" :min="0" :max="10" :precision="2" :step="0.1" style="width: 100%" />
+                    </el-form-item>
+                  </el-col>
+                </el-row>
+                <el-row :gutter="10">
+                  <el-col :span="12">
+                    <el-form-item label="车高 (m)">
+                      <el-input-number v-model="truckParams.height" :min="0" :max="10" :precision="2" :step="0.1" style="width: 100%" />
+                    </el-form-item>
+                  </el-col>
+                  <el-col :span="12">
+                    <el-form-item label="总重 (吨)">
+                      <el-input-number v-model="truckParams.weight" :min="0" :max="500" :precision="2" :step="1" style="width: 100%" />
+                    </el-form-item>
+                  </el-col>
+                </el-row>
+                <el-form-item label="轴距 (m)">
+                  <el-input-number v-model="truckParams.wheelbase" :min="0" :max="50" :precision="2" :step="0.5" style="width: 100%" />
+                  <div class="form-tip">最小转弯半径：{{ minTurningRadius.toFixed(1) }}m (公式：R = L / sin(35°))</div>
+                </el-form-item>
+              </el-form>
 
-            <!-- 分析记录列表 -->
-            <div v-if="analysisRecords.length > 0" class="analysis-list">
-              <div v-for="record in analysisRecords" :key="record.id" class="analysis-record">
-                <div class="record-header">
-                  <span class="record-name">记录 #{{ record.id }}</span>
-                  <el-tag :type="record.status === 'analyzed' ? 'success' : 'info'" size="small">
-                    {{ record.status === 'analyzed' ? '已分析' : '待分析' }}
-                  </el-tag>
-                </div>
-                <div class="record-points">
-                  <div class="point-item">
-                    <el-icon><CirclePlus /></el-icon> 起点：{{ record.startPoint || '未选择' }}
+              <!-- 状态提示 -->
+              <el-alert
+                v-if="selectMode"
+                title="请在地图上点击选择起点，然后再选择终点"
+                type="info"
+                :closable="false"
+                show-icon
+                style="margin: 10px 0"
+              />
+
+              <!-- 分析记录列表 -->
+              <div v-if="analysisRecords.length > 0" class="analysis-list">
+                <div v-for="record in analysisRecords" :key="record.id" class="analysis-record">
+                  <div class="record-header">
+                    <span class="record-name">记录 #{{ record.id }}</span>
+                    <el-tag :type="record.status === 'analyzed' ? 'success' : 'info'" size="small">
+                      {{ record.status === 'analyzed' ? '已分析' : '待分析' }}
+                    </el-tag>
                   </div>
-                  <div class="point-item">
-                    <el-icon><CirclePlus /></el-icon> 终点：{{ record.endPoint || '未选择' }}
+                  <div class="record-points">
+                    <div class="point-item">
+                      <el-icon><CirclePlus /></el-icon> 起点：{{ record.startPoint || '未选择' }}
+                    </div>
+                    <div class="point-item">
+                      <el-icon><CirclePlus /></el-icon> 终点：{{ record.endPoint || '未选择' }}
+                    </div>
                   </div>
-                </div>
-                <div class="record-actions">
-                  <el-button
-                    v-if="record.startLat && record.startLon && record.endLat && record.endLon && record.status !== 'analyzed'"
-                    type="primary"
-                    size="small"
-                    @click="analyzeRoute(record)"
-                    :loading="record.analyzing"
-                  >
-                    计算分析
-                  </el-button>
-                  <el-button
-                    v-if="record.status === 'analyzed'"
-                    :type="record.visible ? 'warning' : 'success'"
-                    size="small"
-                    @click="toggleResult(record)"
-                  >
-                    {{ record.visible ? '隐藏' : '显示' }}
-                  </el-button>
-                  <el-button
-                    v-if="record.status === 'analyzed'"
-                    type="primary"
-                    size="small"
-                    @click="analyzeRoute(record)"
-                    :loading="record.analyzing"
-                  >
-                    重算
-                  </el-button>
-                  <el-button
-                    type="danger"
-                    size="small"
-                    @click="deleteRecord(record.id)"
-                  >
-                    删除
-                  </el-button>
+                  <div class="record-actions">
+                    <el-button
+                      v-if="record.startLat && record.startLon && record.endLat && record.endLon && record.status !== 'analyzed'"
+                      type="primary"
+                      size="small"
+                      @click="analyzeRoute(record)"
+                      :loading="record.analyzing"
+                    >
+                      计算分析
+                    </el-button>
+                    <el-button
+                      v-if="record.status === 'analyzed'"
+                      :type="record.visible ? 'warning' : 'success'"
+                      size="small"
+                      @click="toggleResult(record)"
+                    >
+                      {{ record.visible ? '隐藏' : '显示' }}
+                    </el-button>
+                    <el-button
+                      v-if="record.status === 'analyzed'"
+                      type="primary"
+                      size="small"
+                      @click="analyzeRoute(record)"
+                      :loading="record.analyzing"
+                    >
+                      重算
+                    </el-button>
+                    <el-button
+                      type="danger"
+                      size="small"
+                      @click="deleteRecord(record.id)"
+                    >
+                      删除
+                    </el-button>
+                  </div>
                 </div>
               </div>
+              <div v-else class="empty-tip">
+                暂无分析记录，请点击"打点选择起点终点"添加
+              </div>
             </div>
-            <div v-else class="empty-tip">
-              暂无分析记录，请点击"打点选择起点终点"添加
-            </div>
-
             <!-- 查看历史对话框 -->
             <el-dialog v-model="showHistoryDialog" title="分析历史" width="700px">
               <div v-if="analysisHistory.length === 0 && !loadingHistory" class="empty-tip">
@@ -510,8 +598,11 @@
             </el-dialog>
 
             <!-- 已保存分析详情对话框 -->
-            <el-dialog v-model="showSavedDetailDialog" title="分析详情" width="900px" class="analysis-detail-dialog">
+            <el-dialog v-model="showSavedDetailDialog" title="分析详情【MapTools 组件-V3 测试版】" width="900px" class="analysis-detail-dialog">
               <div v-if="currentSavedDetail" class="detail-content">
+                <!-- 测试标记 -->
+                <el-alert type="success" title="【MapTools 组件】这是新的路段详情对话框 - 20260422" :closable="false" show-icon style="margin-bottom: 15px;" />
+
                 <!-- 基本信息 -->
                 <div class="detail-section">
                   <h4 class="detail-title">基本信息</h4>
@@ -564,8 +655,8 @@
                     </el-table-column>
                     <el-table-column label="转弯半径&角度" width="130">
                       <template #default="scope">
-                        <div v-if="scope.row.turnPoint" class="turn-info">
-                          {{ scope.row.turnPoint.turnRadius?.toFixed(1) || '-' }}m / {{ scope.row.turnPoint.turnAngle?.toFixed(1) || '0' }}°
+                        <div v-if="scope.row.turnPoint && scope.row.turnPoint.turnRadius" class="turn-info">
+                          {{ scope.row.turnPoint.turnRadius.toFixed(1) }}m / {{ scope.row.turnPoint.turnAngle?.toFixed(1) || '0' }}°
                         </div>
                         <span v-else class="text-muted">直行</span>
                       </template>
@@ -628,6 +719,7 @@
               </div>
               <template #footer>
                 <el-button @click="showSavedDetailDialog = false">关闭</el-button>
+                <el-button type="primary" @click="reanalyzeFromDetail">用当前参数重算</el-button>
               </template>
             </el-dialog>
           </div>
@@ -640,14 +732,14 @@
 <script setup>
 import { ref, computed, watch, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Upload, Close, Lock, Unlock, Refresh, Picture, Edit, Delete, Plus, Location, CirclePlus, Folder } from '@element-plus/icons-vue'
+import { Upload, Close, Lock, Unlock, Refresh, Picture, Edit, Delete, Plus, Location, CirclePlus, Folder, User, Cpu } from '@element-plus/icons-vue'
 import { getLength, getArea } from 'ol/sphere'
 import { transform, fromLonLat } from 'ol/proj'
 import { useImageStore } from '@/stores/image'
 import { getImages, deleteImage as deleteImageApi } from '@/api/image'
 import { getBatches, getImagesByBatch, saveAdjustment as saveAdjustmentApi, saveAdjusted as saveAdjustedApi, deleteBatch, updateBatch } from '@/api/batch'
 import { getRoadNetworks, deleteRoadNetwork as deleteRoadNetworkApi } from '@/api/roadNetwork'
-import { analyzeTruck, getAnalysisHistory, saveAnalysisRecord, getSavedAnalysisList } from '@/api/truckAnalysis'
+import { analyzeTruck, getAnalysisHistory, saveAnalysisRecord, getSavedAnalysisList, getSavedAnalysisDetail } from '@/api/truckAnalysis'
 import VectorSource from 'ol/source/Vector'
 import VectorLayer from 'ol/layer/Vector'
 import GeoJSON from 'ol/format/GeoJSON'
@@ -692,6 +784,7 @@ const roadNetworks = ref([])
 const roadNetworkLayers = ref({})
 
 // 货车分析相关
+const currentAnalysisId = ref(null)  // 当前分析 UUID
 const analysisRecords = ref([])
 const selectMode = ref(false)
 const selectPointCallback = ref(null)
@@ -704,6 +797,7 @@ const truckParams = ref({
   weight: 20,
   wheelbase: 8
 })
+const currentAnalyzingRecord = ref(null)  // 当前正在分析的记录
 
 // 历史分析相关
 const showHistoryDialog = ref(false)
@@ -720,6 +814,12 @@ const minTurningRadius = computed(() => {
 })
 
 const hasAnalysisRecords = computed(() => analysisRecords.value.length > 0)
+
+// AI Chat 相关
+const chatMessages = ref([])
+const chatInput = ref('')
+const chatLoading = ref(false)
+const chatMessagesRef = ref(null)
 
 // 合并路段、转弯点、禁行点数据
 const mergedRoadSegments = computed(() => {
@@ -1551,8 +1651,16 @@ const loadRoadNetworkGeoJson = async (networkId) => {
 
     // 自动缩放到路网范围
     const extent = source.getExtent()
-    if (extent && extent[0] !== Infinity) {
-      props.map.getView().fit(extent, { duration: 500, padding: [50, 50, 50, 50], maxZoom: 16 })
+    if (extent && extent[0] !== Infinity && extent[0] !== -Infinity) {
+      console.log('[MapTools] 路网 extent:', extent)
+      // 检查 extent 是否有效（不能太大也不能太小）
+      const width = extent[2] - extent[0]
+      const height = extent[3] - extent[1]
+      if (width > 0 && height > 0 && width < 10000000 && height < 10000000) {
+        props.map.getView().fit(extent, { duration: 500, padding: [50, 50, 50, 50] })
+      } else {
+        console.log('[MapTools] 路网 extent 范围异常，跳过自动缩放')
+      }
     }
   } catch (error) {
     console.error('加载路网 GeoJSON 失败:', error)
@@ -1600,31 +1708,74 @@ const deleteRoadNetwork = async (id) => {
 
 // ==================== 货车分析方法 ====================
 
+// 创建分析（生成 UUID）
+const createAnalysis = () => {
+  // 如果已有分析会话，先清空
+  if (currentAnalysisId.value) {
+    clearAnalysis()
+  }
+
+  currentAnalysisId.value = `ANALYSIS-${Date.now()}`
+
+  ElMessage.success('已创建分析会话，请点击"打点选择起点终点"')
+}
+
 // 开始选择起点终点
 const startSelectPoints = () => {
+  if (!currentAnalysisId.value) {
+    ElMessage.warning('请先点击"创建分析"')
+    return
+  }
+
   if (!props.map) {
     ElMessage.warning('地图未初始化')
     return
   }
 
-  selectMode.value = true
-
-  // 创建新记录
-  const newRecord = {
-    id: Date.now(),
-    startLat: null,
-    startLon: null,
-    startPoint: '',
-    endLat: null,
-    endLon: null,
-    endPoint: '',
-    status: 'pending',
-    analyzing: false,
-    result: null,
-    visible: false
+  // 防止重复调用
+  if (selectMode.value) {
+    console.log('[MapTools] startSelectPoints: already in select mode, skip')
+    return
   }
-  analysisRecords.value.push(newRecord)
-  currentRecordId.value = newRecord.id
+
+  // 检查是否有已完成的记录（有起点和终点但未分析）
+  const hasPendingRecord = analysisRecords.value.some(r =>
+    r.startLat && r.startLon && r.endLat && r.endLon && r.status !== 'analyzed'
+  )
+
+  // 如果没有记录或所有记录都已完成，创建新记录
+  if (analysisRecords.value.length === 0 || hasPendingRecord) {
+    const newRecord = {
+      id: Date.now(),
+      analysisId: currentAnalysisId.value,
+      startLat: null,
+      startLon: null,
+      startPoint: '',
+      endLat: null,
+      endLon: null,
+      endPoint: '',
+      status: 'pending',
+      analyzing: false,
+      result: null,
+      visible: false,
+      saved: false,
+      dbId: null  // 数据库记录 ID
+    }
+    analysisRecords.value.push(newRecord)
+    currentRecordId.value = newRecord.id
+    currentAnalyzingRecord.value = newRecord
+  } else {
+    // 使用第一个未完成的记录
+    const pendingRecord = analysisRecords.value.find(r =>
+      !(r.startLat && r.startLon && r.endLat && r.endLon)
+    )
+    if (pendingRecord) {
+      currentRecordId.value = pendingRecord.id
+      currentAnalyzingRecord.value = pendingRecord
+    }
+  }
+
+  selectMode.value = true
 
   ElMessage.info('请在地图上点击选择起点')
 
@@ -1636,23 +1787,31 @@ const startSelectPoints = () => {
 
 // 处理选点
 const handlePointSelected = (lat, lon, type) => {
+  console.log('[MapTools] handlePointSelected called: type=', type, 'lat=', lat, 'lon=', lon)
+  console.log('[MapTools] handlePointSelected: currentRecordId=', currentRecordId.value)
+  console.log('[MapTools] handlePointSelected: analysisRecords count=', analysisRecords.value.length)
+
   const record = analysisRecords.value.find(r => r.id === currentRecordId.value)
+  console.log('[MapTools] handlePointSelected: found record=', record ? record.id : 'null')
+
   if (!record) return
 
   if (type === 'start') {
     record.startLat = lat
     record.startLon = lon
     record.startPoint = `${lat.toFixed(4)}, ${lon.toFixed(4)}`
-    ElMessage.success('起点已选择，请选择终点')
+    console.log('[MapTools] handlePointSelected: start point set, record=', record)
     showTruckAnalysisPoint(lat, lon, 'start')
+    ElMessage.success('起点已选择，请选择终点')
   } else if (type === 'end') {
     record.endLat = lat
     record.endLon = lon
     record.endPoint = `${lat.toFixed(4)}, ${lon.toFixed(4)}`
-    ElMessage.success('终点已选择，请点击"计算分析"')
+    console.log('[MapTools] handlePointSelected: end point set, record=', record)
     selectMode.value = false
-    currentRecordId.value = null
+    // 不清空 currentRecordId，保持对当前记录的引用
     showTruckAnalysisPoint(lat, lon, 'end')
+    ElMessage.success('终点已选择，请点击"计算分析"')
   }
 }
 
@@ -1714,11 +1873,24 @@ const analyzeRoute = async (record) => {
     return
   }
 
+  // 防止重复分析
+  if (record.analyzing) {
+    console.log('[MapTools] analyzeRoute: already analyzing, skip')
+    return
+  }
+
   try {
     record.analyzing = true
+    // 重算时清除已保存状态，需要重新保存
+    if (record.saved) {
+      record.saved = false
+    }
+    currentAnalyzingRecord.value = record
+
+    console.log('[MapTools] analyzeRoute: sending request for record', record.id, 'analysisId:', currentAnalysisId.value)
 
     const params = {
-      requestName: `记录 #${record.id}: ${record.startPoint} -> ${record.endPoint}`,
+      requestName: `分析 #${record.id}`,
       startLat: record.startLat,
       startLon: record.startLon,
       endLat: record.endLat,
@@ -1735,16 +1907,25 @@ const analyzeRoute = async (record) => {
 
     const result = await analyzeTruck(params)
 
+    // 解包 API 响应：{code: 200, message: 'success', data: {...}}
+    const analysisResult = result.data || result
+
+    console.log('[MapTools] analyzeRoute: received response, roadSegments length =', analysisResult.roadSegments?.length)
+
     record.status = 'analyzed'
-    record.result = result
-    ElMessage.success('分析完成')
+    record.result = analysisResult
+    record.analyzing = false
+
+    // 更新当前分析记录
+    currentAnalyzingRecord.value = record
+
+    ElMessage.success('分析完成，请点击"保存结果"保存')
 
     // 通知父组件显示结果
-    emit('truck-analysis-locate', result)
+    emit('truck-analysis-locate', analysisResult)
 
   } catch (error) {
     ElMessage.error('分析失败：' + error.message)
-  } finally {
     record.analyzing = false
   }
 }
@@ -1774,9 +1955,31 @@ const deleteRecord = (id) => {
 
 // 清空所有记录
 const clearAnalysis = () => {
+  // 清空 UUID 会话
+  currentAnalysisId.value = null
+  // 清空记录
   analysisRecords.value = []
+  currentAnalyzingRecord.value = null
+  currentRecordId.value = null
+  selectMode.value = false
+
+  // 清除地图上的路线和标记
   clearTruckAnalysisPoints()
-  ElMessage.success('已清空所有记录')
+  emit('truck-analysis-hide')
+
+  ElMessage.success('已清空，回到初始状态')
+}
+
+// 清空当前分析（保留 UUID 会话，只清空记录）
+const clearCurrentAnalysis = () => {
+  analysisRecords.value = []
+  currentAnalyzingRecord.value = null
+  currentRecordId.value = null
+  selectMode.value = false
+
+  // 清除地图上的路线和标记
+  clearTruckAnalysisPoints()
+  emit('truck-analysis-hide')
 }
 
 // ==================== 历史分析方法 ====================
@@ -1813,6 +2016,73 @@ const loadSavedList = async () => {
     ElMessage.error('加载列表失败：' + error.message)
   } finally {
     loadingSaved.value = false
+  }
+}
+
+// 手动保存当前分析结果
+const saveCurrentAnalysis = async () => {
+  if (!currentAnalyzingRecord.value || !currentAnalyzingRecord.value.result) {
+    ElMessage.warning('没有可保存的分析结果')
+    return
+  }
+
+  const record = currentAnalyzingRecord.value
+
+  // 如果已保存或正在保存，跳过
+  if (record.saved) {
+    ElMessage.info('分析结果已保存，无需重复保存')
+    return
+  }
+
+  if (record.saving) {
+    console.log('[MapTools] saveCurrentAnalysis: already saving, skip')
+    ElMessage.info('正在保存中，请稍候...')
+    return
+  }
+
+  const result = record.result
+
+  try {
+    record.saving = true
+    const data = {
+      id: record.dbId,  // 数据库记录 ID，用于更新
+      analysisId: currentAnalysisId.value,  // 关联当前分析 UUID
+      name: `记录 #${record.id}: ${record.startPoint} -> ${record.endPoint}`,
+      startPoint: record.startPoint,
+      endPoint: record.endPoint,
+      startLat: record.startLat,
+      startLon: record.startLon,
+      endLat: record.endLat,
+      endLon: record.endLon,
+      truckParams: {
+        length: truckParams.value.length,
+        width: truckParams.value.width,
+        height: truckParams.value.height,
+        weight: truckParams.value.weight,
+        axleWeight: truckParams.value.weight / 2,
+        wheelbase: truckParams.value.wheelbase
+      },
+      routeGeoJson: result.routeGeoJson,
+      turnPoints: result.turnPoints,
+      violations: result.violations,
+      roadSegments: result.roadSegments,  // 路段数据
+      totalDistance: result.totalDistance,
+      estimatedTime: result.estimatedTime
+    }
+
+    console.log('[MapTools] saveCurrentAnalysis: calling save API...', record.dbId ? 'UPDATE' : 'INSERT')
+    const savedResult = await saveAnalysisRecord(data)
+    // 保存数据库 ID，用于后续更新
+    if (savedResult && savedResult.data && savedResult.data.id) {
+      record.dbId = savedResult.data.id
+    }
+    ElMessage.success('保存成功')
+    // 标记为已保存
+    record.saved = true
+  } catch (error) {
+    ElMessage.error('保存失败：' + error.message)
+  } finally {
+    record.saving = false
   }
 }
 
@@ -1865,22 +2135,60 @@ const loadHistoryResult = (record) => {
 // 加载已保存结果
 const loadSavedResult = async (item) => {
   try {
-    // 恢复货车参数
+    // 1. 生成/恢复 UUID（使用后端返回的 analysisId 或创建新 UUID）
+    currentAnalysisId.value = item.analysisId || `ANALYSIS-${Date.now()}`
+
+    // 2. 恢复货车参数
     if (item.truckParams) {
       truckParams.value = item.truckParams
     }
 
-    // 恢复分析结果
+    // 3. 构建分析记录对象
+    const startPoint = `${item.startLat?.toFixed(4) || '0'}, ${item.startLon?.toFixed(4) || '0'}`
+    const endPoint = `${item.endLat?.toFixed(4) || '0'}, ${item.endLon?.toFixed(4) || '0'}`
+
+    const record = {
+      id: 1,  // 前端记录 ID
+      dbId: item.id,  // 数据库记录 ID
+      name: item.name || `记录 #1`,
+      startPoint,
+      endPoint,
+      startLat: item.startLat,
+      startLon: item.startLon,
+      endLat: item.endLat,
+      endLon: item.endLon,
+      status: 'analyzed',
+      saved: true,
+      visible: true,
+      analyzing: false,
+      saving: false,
+      result: {
+        isPassable: item.isPassable,
+        routeGeoJson: item.routeGeoJson,
+        turnPoints: item.turnPoints,
+        violations: item.violations,
+        roadSegments: item.roadSegments,
+        totalDistance: item.totalDistance,
+        estimatedTime: item.estimatedTime
+      }
+    }
+
+    // 4. 设置当前分析记录和记录列表
+    currentAnalyzingRecord.value = record
+    analysisRecords.value = [record]
+
+    // 5. 恢复分析结果（地图显示）
     const analysisResult = {
       isPassable: item.isPassable,
       routeGeoJson: item.routeGeoJson,
       turnPoints: item.turnPoints,
       violations: item.violations,
+      roadSegments: item.roadSegments,
       totalDistance: item.totalDistance,
       estimatedTime: item.estimatedTime
     }
 
-    // 通知父组件显示结果
+    // 6. 通知父组件显示结果
     emit('truck-analysis-locate', analysisResult)
 
     showSavedListDialog.value = false
@@ -1892,9 +2200,59 @@ const loadSavedResult = async (item) => {
 }
 
 // 查看已保存详情
-const viewSavedDetail = (item) => {
-  currentSavedDetail.value = item
-  showSavedDetailDialog.value = true
+const viewSavedDetail = async (item) => {
+  try {
+    // 从后端获取完整详情
+    const result = await getSavedAnalysisDetail(item.id)
+    currentSavedDetail.value = result.data || result
+    showSavedDetailDialog.value = true
+  } catch (error) {
+    console.error('[MapTools] 获取详情失败:', error)
+    ElMessage.error('获取详情失败：' + error.message)
+  }
+}
+
+// 从详情对话框重算（使用当前货车参数）
+const reanalyzeFromDetail = () => {
+  if (!currentSavedDetail.value) {
+    ElMessage.warning('没有可重算的数据')
+    return
+  }
+
+  // 关闭详情对话框
+  showSavedDetailDialog.value = false
+
+  // 生成新 UUID
+  currentAnalysisId.value = `ANALYSIS-${Date.now()}`
+
+  // 不恢复保存时的货车参数，使用当前设置的参数
+  // 构建分析记录
+  const startPoint = `${currentSavedDetail.value.startLat?.toFixed(4) || '0'}, ${currentSavedDetail.value.startLon?.toFixed(4) || '0'}`
+  const endPoint = `${currentSavedDetail.value.endLat?.toFixed(4) || '0'}, ${currentSavedDetail.value.endLon?.toFixed(4) || '0'}`
+
+  const record = {
+    id: 1,
+    dbId: currentSavedDetail.value.id,
+    name: currentSavedDetail.value.name || '重算记录',
+    startPoint,
+    endPoint,
+    startLat: currentSavedDetail.value.startLat,
+    startLon: currentSavedDetail.value.startLon,
+    endLat: currentSavedDetail.value.endLat,
+    endLon: currentSavedDetail.value.endLon,
+    status: 'pending',  // 待分析状态
+    saved: false,  // 需要重新保存
+    visible: true,
+    analyzing: false,
+    saving: false,
+    result: null
+  }
+
+  // 设置当前分析记录
+  analysisRecords.value = [record]
+  currentAnalyzingRecord.value = record
+
+  ElMessage.success('已加载记录，请使用当前货车参数重新分析')
 }
 
 // 删除已保存的结果
@@ -1923,6 +2281,73 @@ const deleteSaved = async (id) => {
       ElMessage.error('删除失败：' + error.message)
     }
   }
+}
+
+// AI Chat 相关方法
+import { generateResponse } from '@/api/ollama'
+
+const handleChatSend = async () => {
+  if (!chatInput.value.trim() || chatLoading.value) return
+
+  const userMessage = chatInput.value.trim()
+  chatInput.value = ''
+
+  // 添加用户消息
+  const now = new Date()
+  chatMessages.value.push({
+    role: 'user',
+    content: userMessage,
+    time: now.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
+  })
+
+  // 滚动到底部
+  scrollToBottom()
+
+  try {
+    chatLoading.value = true
+
+    // 调用 Ollama API
+    let aiResponse = ''
+    await generateResponse(
+      userMessage,
+      'qwen2.5',
+      (chunk, done) => {
+        aiResponse += chunk
+        if (done) {
+          chatLoading.value = false
+          // 添加 AI 消息
+          chatMessages.value.push({
+            role: 'ai',
+            content: aiResponse,
+            time: new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
+          })
+          scrollToBottom()
+        }
+      }
+    )
+  } catch (error) {
+    chatLoading.value = false
+    ElMessage.error('AI 响应失败：' + error.message)
+    // 添加错误消息
+    chatMessages.value.push({
+      role: 'ai',
+      content: '抱歉，我遇到了一些问题：' + error.message,
+      time: new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
+    })
+  }
+}
+
+const scrollToBottom = () => {
+  setTimeout(() => {
+    if (chatMessagesRef.value) {
+      chatMessagesRef.value.scrollTop = chatMessagesRef.value.scrollHeight
+    }
+  }, 100)
+}
+
+const clearChatHistory = () => {
+  chatMessages.value = []
+  ElMessage.success('已清空聊天记录')
 }
 
 // 暴露方法
@@ -2314,17 +2739,48 @@ defineExpose({
 }
 
 /* 货车分析详情对话框样式 */
-.analysis-detail-dialog {
-  .detail-content {
-    max-height: 600px;
-    overflow-y: auto;
-    padding: 0 10px;
+.truck-analysis-section {
+  .analysis-id-bar {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px;
+    background: #f5f7fa;
+    border-radius: 4px;
+    margin-bottom: 15px;
+
+    .id-label {
+      font-size: 13px;
+      color: #909399;
+      font-weight: 500;
+    }
+
+    .id-value {
+      font-size: 13px;
+      font-weight: bold;
+      color: #606266;
+      font-family: monospace;
+    }
   }
 
-  .detail-section {
-    margin-bottom: 20px;
-    padding-bottom: 20px;
+  .record-menu {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 15px;
+    padding-bottom: 15px;
     border-bottom: 1px solid #eee;
+  }
+
+  .edit-section {
+    .analysis-actions {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      margin-bottom: 15px;
+    }
+  }
+
+  .analysis-list {
 
     &:last-child {
       border-bottom: none;
@@ -2460,5 +2916,149 @@ defineExpose({
       color: #409eff;
     }
   }
+}
+
+/* AI Chat 样式 */
+.ai-chat-content {
+  padding: 0;
+  height: 500px;
+  display: flex;
+  flex-direction: column;
+}
+
+.chat-container {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.chat-messages {
+  flex: 1;
+  overflow-y: auto;
+  padding: 10px;
+  background: #f5f7fa;
+}
+
+.chat-message {
+  display: flex;
+  align-items: flex-start;
+  margin-bottom: 15px;
+  gap: 10px;
+}
+
+.chat-message.user {
+  flex-direction: row-reverse;
+}
+
+.message-avatar {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 18px;
+  flex-shrink: 0;
+}
+
+.chat-message.user .message-avatar {
+  background: #409eff;
+  color: white;
+}
+
+.chat-message.ai .message-avatar {
+  background: #67c23a;
+  color: white;
+}
+
+.message-content {
+  max-width: 75%;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.chat-message.user .message-content {
+  align-items: flex-end;
+}
+
+.message-text {
+  padding: 10px 14px;
+  border-radius: 12px;
+  background: white;
+  color: #303133;
+  font-size: 14px;
+  line-height: 1.5;
+  word-wrap: break-word;
+}
+
+.chat-message.user .message-text {
+  background: #409eff;
+  color: white;
+}
+
+.message-time {
+  font-size: 11px;
+  color: #909399;
+  padding: 0 4px;
+}
+
+/* 打字动画 */
+.typing {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 12px 16px;
+}
+
+.typing-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #909399;
+  animation: typing 1.4s infinite;
+}
+
+.typing-dot:nth-child(2) {
+  animation-delay: 0.2s;
+}
+
+.typing-dot:nth-child(3) {
+  animation-delay: 0.4s;
+}
+
+@keyframes typing {
+  0%, 60%, 100% {
+    transform: translateY(0);
+    opacity: 0.7;
+  }
+  30% {
+    transform: translateY(-4px);
+    opacity: 1;
+  }
+}
+
+.chat-input-area {
+  border-top: 1px solid #e4e7ed;
+  padding: 10px;
+  background: white;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.chat-input {
+  width: 100%;
+}
+
+.chat-input :deep(.el-textarea__inner) {
+  resize: none;
+  font-size: 14px;
+}
+
+.chat-input-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
 }
 </style>

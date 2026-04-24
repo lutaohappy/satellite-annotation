@@ -524,13 +524,17 @@ const initMap = () => {
       const lat = lonLat[1]
       const lon = lonLat[0]
 
+      console.log('[TruckAnalysis] Map click: step=', truckAnalysisSelectStep, 'callback=', typeof truckAnalysisSelectCallback)
+
       if (truckAnalysisSelectStep === 'start') {
         // 选择起点
+        console.log('[TruckAnalysis] Calling callback for start point')
         truckAnalysisSelectCallback(lat, lon, 'start')
         truckAnalysisSelectStep = 'end'
         ElMessage.success('起点已选择，请选择终点')
       } else if (truckAnalysisSelectStep === 'end') {
         // 选择终点
+        console.log('[TruckAnalysis] Calling callback for end point')
         truckAnalysisSelectCallback(lat, lon, 'end')
         truckAnalysisSelectCallback = null
         truckAnalysisSelectStep = null
@@ -3056,8 +3060,10 @@ let truckAnalysisSelectCallback = null
 let truckAnalysisSelectStep = null  // 'start' or 'end'
 
 const handleTruckAnalysisSelect = (callback) => {
+  console.log('[TruckAnalysis] handleTruckAnalysisSelect called, previous callback:', truckAnalysisSelectCallback ? 'exists' : 'null')
   truckAnalysisSelectCallback = callback
   truckAnalysisSelectStep = 'start'
+  console.log('[TruckAnalysis] handleTruckAnalysisSelect: callback set, showing message')
   ElMessage.info('请在地图上点击选择起点')
 }
 

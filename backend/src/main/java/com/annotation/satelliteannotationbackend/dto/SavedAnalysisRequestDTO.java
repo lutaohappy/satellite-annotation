@@ -7,6 +7,8 @@ import java.util.List;
  */
 public class SavedAnalysisRequestDTO {
 
+    private Long id;  // 记录 ID，用于更新
+    private String analysisId;  // 分析会话 UUID
     private String name;
     private String startPoint;
     private String endPoint;
@@ -23,6 +25,22 @@ public class SavedAnalysisRequestDTO {
     private List<RoadSegmentDTO> roadSegments;  // 路段列表
 
     // Getters and Setters
+
+    public Long getId() {
+        return id;
+    }
+
+    public void setId(Long id) {
+        this.id = id;
+    }
+
+    public String getAnalysisId() {
+        return analysisId;
+    }
+
+    public void setAnalysisId(String analysisId) {
+        this.analysisId = analysisId;
+    }
 
     public String getName() {
         return name;

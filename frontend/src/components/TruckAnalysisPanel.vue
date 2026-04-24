@@ -188,9 +188,10 @@
           </el-table-column>
           <el-table-column label="半径" width="90">
             <template #default="scope">
-              <span :class="{ 'sharp-turn': scope.row.turnRadius && scope.row.turnRadius < minTurningRadius }">
-                {{ scope.row.turnRadius?.toFixed(1) }}m
+              <span v-if="scope.row.turnRadius" :class="{ 'sharp-turn': scope.row.turnRadius < minTurningRadius }">
+                {{ scope.row.turnRadius.toFixed(1) }}m
               </span>
+              <span v-else class="text-muted">直行</span>
             </template>
           </el-table-column>
           <el-table-column label="操作" width="80" fixed="right">
@@ -262,9 +263,6 @@
         <el-table-column label="属性信息" width="180">
           <template #default="scope">
             <div class="segment-properties">
-              <span v-if="scope.row.turnRadius" :class="{ 'sharp-turn': scope.row.turnRadius < minTurningRadius }">
-                转弯半径：{{ scope.row.turnRadius.toFixed(1) }}m
-              </span>
               <span v-if="scope.row.restrictions" class="restriction">
                 {{ scope.row.restrictions }}
               </span>

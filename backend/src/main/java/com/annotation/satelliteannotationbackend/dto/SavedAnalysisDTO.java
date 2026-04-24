@@ -244,9 +244,12 @@ public class SavedAnalysisDTO {
                     new TypeReference<List<RoadSegmentDTO>>() {}
                 );
                 dto.setRoadSegments(roadSegments);
+                System.out.println("[SavedAnalysisDTO] Loaded roadSegments: " + roadSegments.size() + " segments");
             } catch (Exception e) {
-                // 忽略解析错误
+                System.err.println("[SavedAnalysisDTO] Failed to parse roadSegments: " + e.getMessage());
             }
+        } else {
+            System.out.println("[SavedAnalysisDTO] roadSegments is null in entity for id=" + entity.getId());
         }
 
         return dto;
@@ -299,12 +302,73 @@ public class SavedAnalysisDTO {
         if (request.getRoadSegments() != null) {
             try {
                 ObjectMapper mapper = new ObjectMapper();
-                entity.setRoadSegments(mapper.writeValueAsString(request.getRoadSegments()));
+                String roadSegmentsJson = mapper.writeValueAsString(request.getRoadSegments());
+                System.out.println("[SavedAnalysisDTO] Saving roadSegments: " + roadSegmentsJson.substring(0, Math.min(200, roadSegmentsJson.length())) + "...");
+                entity.setRoadSegments(roadSegmentsJson);
+            } catch (Exception e) {
+                System.err.println("[SavedAnalysisDTO] Failed to serialize roadSegments: " + e.getMessage());
+                e.printStackTrace();
+            }
+        } else {
+            System.out.println("[SavedAnalysisDTO] roadSegments is null in request");
+        }
+
+        return entity;
+    }
+
+    /**
+     * 更新现有实体
+     */
+    public static void updateEntity(TruckAnalysisRequest entity, SavedAnalysisRequestDTO request) {
+        entity.setRequestName(request.getName());
+        entity.setStartLat(request.getStartLat());
+        entity.setStartLon(request.getStartLon());
+        entity.setEndLat(request.getEndLat());
+        entity.setEndLon(request.getEndLon());
+
+        if (request.getTruckParams() != null) {
+            entity.setTruckLength(request.getTruckParams().getLength());
+            entity.setTruckWidth(request.getTruckParams().getWidth());
+            entity.setTruckHeight(request.getTruckParams().getHeight());
+            entity.setTruckWeight(request.getTruckParams().getWeight());
+            entity.setTruckAxleWeight(request.getTruckParams().getAxleWeight());
+            entity.setWheelbase(request.getTruckParams().getWheelbase());
+        }
+
+        entity.setRouteGeoJson(request.getRouteGeoJson());
+        entity.setIsPassable(request.getViolations() == null || request.getViolations().isEmpty());
+
+        // 保存禁行点为 JSON
+        if (request.getViolations() != null) {
+            try {
+                ObjectMapper mapper = new ObjectMapper();
+                entity.setViolationPoints(mapper.writeValueAsString(request.getViolations()));
             } catch (Exception e) {
                 // 忽略序列化错误
             }
         }
 
-        return entity;
+        // 保存转弯点为 JSON
+        if (request.getTurnPoints() != null) {
+            try {
+                ObjectMapper mapper = new ObjectMapper();
+                entity.setTurnPoints(mapper.writeValueAsString(request.getTurnPoints()));
+            } catch (Exception e) {
+                // 忽略序列化错误
+            }
+        }
+
+        // 保存路段列表为 JSON
+        if (request.getRoadSegments() != null) {
+            try {
+                ObjectMapper mapper = new ObjectMapper();
+                String roadSegmentsJson = mapper.writeValueAsString(request.getRoadSegments());
+                System.out.println("[SavedAnalysisDTO] Updating roadSegments: " + roadSegmentsJson.substring(0, Math.min(200, roadSegmentsJson.length())) + "...");
+                entity.setRoadSegments(roadSegmentsJson);
+            } catch (Exception e) {
+                System.err.println("[SavedAnalysisDTO] Failed to serialize roadSegments: " + e.getMessage());
+                e.printStackTrace();
+            }
+        }
     }
 }
