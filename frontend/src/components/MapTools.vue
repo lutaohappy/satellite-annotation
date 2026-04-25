@@ -323,6 +323,30 @@
       <el-tab-pane label="AI 助手" name="ai-chat">
         <div class="tab-content ai-chat-content">
           <div class="chat-container">
+            <!-- 会话管理栏 -->
+            <div class="chat-session-bar">
+              <div class="session-selector">
+                <el-select v-model="currentSessionId" placeholder="选择会话" size="small" @change="switchSession" style="width: 200px">
+                  <el-option
+                    v-for="session in chatSessions"
+                    :key="session.id"
+                    :label="session.title"
+                    :value="session.id"
+                  >
+                    <span>{{ session.title }}</span>
+                    <span class="session-time">{{ session.updatedAt }}</span>
+                  </el-option>
+                </el-select>
+              </div>
+              <div class="session-actions">
+                <el-button size="small" @click="createNewSession" title="新建会话">
+                  <el-icon><Plus /></el-icon>
+                </el-button>
+                <el-button size="small" :disabled="chatSessions.length <= 1" @click="deleteCurrentSession" title="删除当前会话" type="danger">
+                  <el-icon><Delete /></el-icon>
+                </el-button>
+              </div>
+            </div>
             <!-- 聊天消息列表 -->
             <div class="chat-messages" ref="chatMessagesRef">
               <div
@@ -816,10 +840,16 @@ const minTurningRadius = computed(() => {
 const hasAnalysisRecords = computed(() => analysisRecords.value.length > 0)
 
 // AI Chat 相关
+const chatSessions = ref([])
+const currentSessionId = ref('')
 const chatMessages = ref([])
 const chatInput = ref('')
 const chatLoading = ref(false)
 const chatMessagesRef = ref(null)
+const chatContextMemory = ref({}) // 存储每个会话的上下文
+
+// 本地存储键名
+const CHAT_STORAGE_KEY = 'ai_chat_sessions'
 
 // 合并路段、转弯点、禁行点数据
 const mergedRoadSegments = computed(() => {
@@ -2294,11 +2324,15 @@ const handleChatSend = async () => {
 
   // 添加用户消息
   const now = new Date()
-  chatMessages.value.push({
+  const userMsg = {
     role: 'user',
     content: userMessage,
     time: now.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
-  })
+  }
+  chatMessages.value.push(userMsg)
+
+  // 更新当前会话
+  updateCurrentSession(userMessage)
 
   // 滚动到底部
   scrollToBottom()
@@ -2315,9 +2349,12 @@ const handleChatSend = async () => {
     })
     scrollToBottom()
 
+    // 构建带上下文的提示词（多轮对话支持）
+    const contextPrompt = buildContextPrompt(userMessage)
+
     // 调用 Ollama API
     await generateResponse(
-      userMessage,
+      contextPrompt,
       'gemma4:26b',
       (chunk, done) => {
         console.log('[Chat] chunk:', chunk, 'done:', done)
@@ -2328,6 +2365,8 @@ const handleChatSend = async () => {
         if (done) {
           chatLoading.value = false
           console.log('[Chat] 响应完成，chatLoading=false')
+          // 保存 AI 响应到上下文
+          saveSessionToMemory()
           scrollToBottom()
         }
       }
@@ -2337,6 +2376,7 @@ const handleChatSend = async () => {
     if (chatLoading.value) {
       chatLoading.value = false
       console.log('[Chat] 响应结束但 done 未触发，手动设置 chatLoading=false')
+      saveSessionToMemory()
     }
   } catch (error) {
     chatLoading.value = false
@@ -2360,7 +2400,176 @@ const scrollToBottom = () => {
 
 const clearChatHistory = () => {
   chatMessages.value = []
+  chatContextMemory.value[currentSessionId.value] = []
+  saveSessionToMemory()
   ElMessage.success('已清空聊天记录')
+}
+
+// ==================== 会话管理相关 ====================
+
+// 生成会话 ID
+const generateSessionId = () => `chat_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
+
+// 生成会话标题（根据第一条消息）
+const generateSessionTitle = (firstMessage) => {
+  if (!firstMessage) return '新会话'
+  const content = firstMessage.content || ''
+  if (content.length <= 20) return content
+  return content.substr(0, 18) + '...'
+}
+
+// 格式化时间为 HH:MM
+const formatTime = (date) => {
+  const d = new Date(date)
+  return d.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
+}
+
+// 格式化日期为 MM/DD HH:MM
+const formatDateTime = (date) => {
+  const d = new Date(date)
+  const month = d.getMonth() + 1
+  const day = d.getDate()
+  const time = formatTime(date)
+  return `${month}/${day} ${time}`
+}
+
+// 创建新会话
+const createNewSession = () => {
+  const newSession = {
+    id: generateSessionId(),
+    title: '新会话',
+    messages: [],
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString()
+  }
+  chatSessions.value.unshift(newSession)
+  currentSessionId.value = newSession.id
+  chatMessages.value = []
+  chatContextMemory.value[newSession.id] = []
+  saveSessionsToLocalStorage()
+}
+
+// 切换会话
+const switchSession = (sessionId) => {
+  const session = chatSessions.value.find(s => s.id === sessionId)
+  if (!session) return
+
+  // 保存当前会话到内存
+  saveCurrentSessionToMemory()
+
+  // 加载目标会话
+  chatMessages.value = session.messages || []
+  chatContextMemory.value[sessionId] = session.messages || []
+
+  setTimeout(() => {
+    scrollToBottom()
+  }, 100)
+}
+
+// 删除当前会话
+const deleteCurrentSession = () => {
+  if (chatSessions.value.length <= 1) {
+    ElMessage.warning('至少保留一个会话')
+    return
+  }
+
+  const index = chatSessions.value.findIndex(s => s.id === currentSessionId.value)
+  if (index === -1) return
+
+  chatSessions.value.splice(index, 1)
+
+  // 如果删除的是当前会话，切换到第一个会话
+  if (currentSessionId.value === chatSessions.value[index]?.id || index >= chatSessions.value.length) {
+    const newSession = chatSessions.value[0]
+    currentSessionId.value = newSession.id
+    chatMessages.value = newSession.messages || []
+  }
+
+  delete chatContextMemory.value[currentSessionId.value]
+  saveSessionsToLocalStorage()
+  ElMessage.success('已删除会话')
+}
+
+// 更新当前会话的标题和时间
+const updateCurrentSession = (firstMessage) => {
+  const session = chatSessions.value.find(s => s.id === currentSessionId.value)
+  if (!session) return
+
+  // 如果是第一条消息，生成标题
+  if (chatMessages.value.length === 2) { // 2 是因为已经添加了 user + ai 占位
+    session.title = generateSessionTitle({ content: firstMessage })
+  }
+
+  session.updatedAt = new Date().toISOString()
+  saveSessionsToLocalStorage()
+}
+
+// 保存当前会话到内存
+const saveCurrentSessionToMemory = () => {
+  const session = chatSessions.value.find(s => s.id === currentSessionId.value)
+  if (!session) return
+
+  session.messages = [...chatMessages.value]
+  session.updatedAt = new Date().toISOString()
+}
+
+// 保存会话到本地存储
+const saveSessionToMemory = () => {
+  saveCurrentSessionToMemory()
+  saveSessionsToLocalStorage()
+}
+
+// 保存会话列表到 localStorage
+const saveSessionsToLocalStorage = () => {
+  try {
+    localStorage.setItem(CHAT_STORAGE_KEY, JSON.stringify(chatSessions.value))
+  } catch (e) {
+    console.warn('[Chat] 保存会话到 localStorage 失败:', e)
+  }
+}
+
+// 从 localStorage 加载会话列表
+const loadSessionsFromLocalStorage = () => {
+  try {
+    const saved = localStorage.getItem(CHAT_STORAGE_KEY)
+    if (saved) {
+      chatSessions.value = JSON.parse(saved)
+      // 确保每个会话都有 id
+      if (chatSessions.value.length > 0) {
+        currentSessionId.value = chatSessions.value[0].id
+        chatMessages.value = chatSessions.value[0].messages || []
+        chatContextMemory.value[currentSessionId.value] = chatMessages.value
+        return
+      }
+    }
+    // 如果没有 saved 数据，创建默认会话
+    createNewSession()
+  } catch (e) {
+    console.warn('[Chat] 从 localStorage 加载会话失败:', e)
+    createNewSession()
+  }
+}
+
+// 构建带上下文的提示词（多轮对话支持）
+const buildContextPrompt = (userMessage) => {
+  const MAX_CONTEXT_MESSAGES = 10 // 最多保留 10 条历史消息作为上下文
+
+  const context = chatContextMemory.value[currentSessionId.value] || []
+  const recentMessages = context.slice(-MAX_CONTEXT_MESSAGES)
+
+  if (recentMessages.length === 0) {
+    return userMessage
+  }
+
+  // 构建上下文对话历史
+  let contextText = '以下是之前的对话历史：\n\n'
+  for (const msg of recentMessages) {
+    const role = msg.role === 'user' ? '用户' : '助手'
+    contextText += `${role}: ${msg.content}\n`
+  }
+  contextText += `\n以上是之前的对话。现在请回答用户的新问题：\n\n用户：${userMessage}`
+
+  return contextText
 }
 
 // 暴露方法
@@ -2368,6 +2577,11 @@ defineExpose({
   handleDrawEvent,
   loadBatches,
   loadRoadNetworks
+})
+
+// 初始化 AI Chat 会话（在组件挂载时）
+onMounted(() => {
+  loadSessionsFromLocalStorage()
 })
 </script>
 
@@ -2943,6 +3157,41 @@ defineExpose({
   display: flex;
   flex-direction: column;
   height: 100%;
+}
+
+/* 会话管理栏 */
+.chat-session-bar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 10px;
+  background: #f5f7fa;
+  border-bottom: 1px solid #e4e7ed;
+}
+
+.session-selector {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.session-selector .el-select .el-input__inner {
+  font-size: 13px;
+}
+
+.session-time {
+  margin-left: 8px;
+  font-size: 11px;
+  color: #909399;
+}
+
+.session-actions {
+  display: flex;
+  gap: 4px;
+}
+
+.session-actions .el-button {
+  padding: 6px 10px;
 }
 
 .chat-messages {
