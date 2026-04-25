@@ -389,6 +389,29 @@
                   </div>
                 </div>
               </div>
+              <!-- 工具选择 -->
+              <div class="tool-selector">
+                <el-select
+                  v-model="selectedTool"
+                  placeholder="🔧 选择工具"
+                  clearable
+                  @change="handleToolChange"
+                  size="small"
+                  style="width: 100%"
+                >
+                  <el-option
+                    v-for="tool in mcpTools"
+                    :key="tool.name"
+                    :label="tool.displayName"
+                    :value="tool.name"
+                  >
+                    <div class="tool-option">
+                      <span class="tool-name">{{ tool.displayName }}</span>
+                      <span class="tool-desc">{{ tool.description }}</span>
+                    </div>
+                  </el-option>
+                </el-select>
+              </div>
               <!-- 输入区域 -->
               <div class="chat-input-area">
                 <el-input
@@ -863,6 +886,8 @@ const sessionListRef = ref(null)
 const chatContextMemory = ref({}) // 存储每个会话的上下文
 const deviceId = ref('')  // 设备 ID
 const isSyncing = ref(false)  // 同步中状态
+const mcpTools = ref([])  // MCP 工具列表
+const selectedTool = ref('')  // 当前选中的工具
 
 // 本地存储键名
 const CHAT_STORAGE_KEY = 'ai_chat_sessions'
@@ -2330,6 +2355,40 @@ const deleteSaved = async (id) => {
 }
 
 // AI Chat 相关方法
+import { fetchMCPToolsList } from '@/api/ollama'
+
+// ==================== MCP 工具相关 ====================
+
+// 加载 MCP 工具列表
+const loadMCPTools = async () => {
+  try {
+    mcpTools.value = await fetchMCPToolsList()
+    console.log('[Chat] 加载了', mcpTools.value.length, '个 MCP 工具')
+  } catch (error) {
+    console.error('[Chat] 加载 MCP 工具失败:', error)
+  }
+}
+
+// 选择工具时自动填充提示语
+const handleToolChange = (toolName) => {
+  if (!toolName) return
+
+  const tool = mcpTools.value.find(t => t.name === toolName)
+  if (!tool) return
+
+  // 根据工具生成合适的提示语
+  const prompts = {
+    'list_road_networks': '帮我查一下库里面有多少条路网数据？',
+    'list_chat_sessions': '帮我查一下当前有多少个对话？',
+    'echo': '用回声工具测试一下连接',
+    'get_current_time': '现在几点了？'
+  }
+
+  chatInput.value = prompts[toolName] || `调用${tool.displayName}`
+  console.log('[Chat] 选中工具:', tool.displayName, '提示语:', chatInput.value)
+}
+
+// AI Chat 相关方法
 import { chatWithTools } from '@/api/ollama'
 
 const handleChatSend = async () => {
@@ -2752,6 +2811,9 @@ onMounted(async () => {
 
   // 从服务器同步会话（异步）
   await loadChatSessionsFromServer()
+
+  // 加载 MCP 工具列表
+  await loadMCPTools()
 })
 </script>
 
@@ -3531,6 +3593,31 @@ onMounted(async () => {
   display: flex;
   flex-direction: column;
   gap: 8px;
+}
+
+.tool-selector {
+  padding: 0 10px;
+  background: white;
+}
+
+.tool-selector :deep(.el-select__wrapper) {
+  box-shadow: 0 0 0 1px #e4e7ed inset !important;
+}
+
+.tool-option {
+  display: flex;
+  flex-direction: column;
+}
+
+.tool-name {
+  font-weight: 500;
+  color: #303133;
+}
+
+.tool-desc {
+  font-size: 12px;
+  color: #909399;
+  margin-top: 2px;
 }
 
 .chat-input {

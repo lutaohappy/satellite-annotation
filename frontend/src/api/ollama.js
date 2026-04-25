@@ -16,6 +16,37 @@ async function fetchWithTimeout(url, options = {}, timeoutMs = 120000) {
 }
 
 /**
+ * 从 MCP 服务器获取工具定义（导出供外部使用）
+ * @returns {Promise<Array>} [{name, displayName, description}, ...]
+ */
+export async function fetchMCPToolsList() {
+  try {
+    const response = await fetchWithTimeout(`${MCP_BASE_URL}/message`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        jsonrpc: '2.0',
+        id: 'tool-defs-ui',
+        method: 'tools/list',
+        params: {}
+      })
+    }, 10000)
+    if (!response.ok) return []
+    const data = await response.json()
+    const mcpTools = data.result?.tools || []
+
+    return mcpTools.map(tool => ({
+      name: tool.name,
+      displayName: tool.name.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()),
+      description: tool.description
+    }))
+  } catch (error) {
+    console.warn('[Ollama] UI 获取工具列表失败:', error.message)
+    return []
+  }
+}
+
+/**
  * 从 MCP 服务器获取工具定义
  * @returns {Promise<Array>} Ollama 格式的工具列表
  */
