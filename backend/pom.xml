@@ -109,6 +109,13 @@
             <version>1.19.0</version>
         </dependency>
 
+        <!-- MCP Server -->
+        <dependency>
+            <groupId>com.annotation</groupId>
+            <artifactId>mcp-server</artifactId>
+            <version>0.0.1-SNAPSHOT</version>
+        </dependency>
+
         <!-- Test -->
         <dependency>
             <groupId>org.springframework.boot</groupId>

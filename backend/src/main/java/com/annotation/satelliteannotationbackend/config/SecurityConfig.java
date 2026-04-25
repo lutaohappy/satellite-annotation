@@ -52,6 +52,7 @@ public class SecurityConfig {
                                 "/api/auth/**",
                                 "/api/public/**",
                                 "/api/chat-sessions/**",
+                                "/api/mcp/**",
                                 "/api/images/**",
                                 "/api/admin/**",
                                 "/error",

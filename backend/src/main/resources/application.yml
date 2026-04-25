@@ -57,6 +57,18 @@ logging:
     org.springframework.security: WARN
     org.springframework.web.servlet: DEBUG
 
+# MCP 服务器配置
+mcp:
+  server:
+    name: satellite-annotation-mcp
+    version: 1.0.0
+    description: 卫星影像标注系统 MCP 服务器
+    enabled-tools:
+      - echo
+      - get_current_time
+      - list_road_networks
+      - list_chat_sessions
+
 ---
 spring:
   config:
@@ -93,3 +105,15 @@ logging:
     root: INFO
     com.annotation: DEBUG
     org.springframework.security: DEBUG
+
+# MCP 服务器配置
+mcp:
+  server:
+    name: satellite-annotation-mcp
+    version: 1.0.0
+    description: 卫星影像标注系统 MCP 服务器
+    enabled-tools:
+      - echo
+      - get_current_time
+      - list_road_networks
+      - list_chat_sessions

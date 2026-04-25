@@ -1,0 +1,27 @@
+# MCP 服务器配置示例
+
+# 添加到 application.yml 中
+mcp:
+  server:
+    # 服务器名称
+    name: satellite-annotation-mcp
+    # 服务器版本
+    version: 1.0.0
+    # 服务器描述
+    description: 卫星影像标注系统 MCP 服务器
+
+    # 启用的工具列表（留空表示启用所有工具）
+    enabled-tools:
+      - echo
+      - get_current_time
+
+    # 工具配置（可选）
+    tools:
+      - name: echo
+        enabled: true
+        config:
+          max-length: 1000
+      - name: get_current_time
+        enabled: true
+        config:
+          timezone: Asia/Shanghai
