@@ -329,8 +329,8 @@
                 <el-button size="small" @click="createNewSession" title="新建会话">
                   <el-icon><Plus /></el-icon> 新建
                 </el-button>
-                <el-button size="small" @click="saveCurrentSession" title="保存会话">
-                  <el-icon><Document /></el-icon> 保存
+                <el-button size="small" @click="saveCurrentSession" :loading="isSyncing" title="保存到服务器">
+                  <el-icon><Document /></el-icon> 同步
                 </el-button>
                 <el-button size="small" :disabled="chatSessions.length <= 1" @click="deleteCurrentSession" title="删除会话" type="danger">
                   <el-icon><Delete /></el-icon> 删除
@@ -344,7 +344,11 @@
                   :class="{ active: session.id === currentSessionId }"
                   @click="switchSession(session.id)"
                 >
-                  <div class="session-title">{{ session.title }}</div>
+                  <div class="session-header">
+                    <div class="session-title">{{ session.title }}</div>
+                    <el-tag v-if="session.synced" size="small" type="success" class="sync-badge">已同步</el-tag>
+                    <el-tag v-else size="small" type="info" class="sync-badge">本地</el-tag>
+                  </div>
                   <div class="session-meta">
                     <span class="session-count">{{ session.messages?.length || 0 }} 条消息</span>
                     <span class="session-date">{{ formatDate(session.updatedAt) }}</span>
@@ -772,6 +776,7 @@ import { getImages, deleteImage as deleteImageApi } from '@/api/image'
 import { getBatches, getImagesByBatch, saveAdjustment as saveAdjustmentApi, saveAdjusted as saveAdjustedApi, deleteBatch, updateBatch } from '@/api/batch'
 import { getRoadNetworks, deleteRoadNetwork as deleteRoadNetworkApi } from '@/api/roadNetwork'
 import { analyzeTruck, getAnalysisHistory, saveAnalysisRecord, getSavedAnalysisList, getSavedAnalysisDetail } from '@/api/truckAnalysis'
+import { getChatSessions, saveChatSession, deleteChatSession, generateDeviceId } from '@/api/chatSession'
 import VectorSource from 'ol/source/Vector'
 import VectorLayer from 'ol/layer/Vector'
 import GeoJSON from 'ol/format/GeoJSON'
@@ -856,6 +861,8 @@ const chatLoading = ref(false)
 const chatMessagesRef = ref(null)
 const sessionListRef = ref(null)
 const chatContextMemory = ref({}) // 存储每个会话的上下文
+const deviceId = ref('')  // 设备 ID
+const isSyncing = ref(false)  // 同步中状态
 
 // 本地存储键名
 const CHAT_STORAGE_KEY = 'ai_chat_sessions'
@@ -2516,11 +2523,39 @@ const deleteCurrentSession = () => {
   ElMessage.success('已删除会话')
 }
 
-// 保存当前会话
-const saveCurrentSession = () => {
-  saveCurrentSessionToMemory()
-  saveSessionsToLocalStorage()
-  ElMessage.success('会话已保存')
+// 保存当前会话到服务器
+const saveCurrentSession = async () => {
+  if (chatLoading.value) {
+    ElMessage.warning('请等待 AI 响应完成后再保存')
+    return
+  }
+
+  try {
+    saveCurrentSessionToMemory()
+
+    const session = chatSessions.value.find(s => s.id === currentSessionId.value)
+    if (!session) {
+      ElMessage.error('会话不存在')
+      return
+    }
+
+    // 调用 API 保存到服务器
+    const savedSession = await saveChatSession({
+      id: session.id,
+      title: session.title,
+      messages: session.messages
+    }, deviceId.value)
+
+    // 更新本地状态
+    session.synced = true
+    session.serverData = savedSession
+
+    saveSessionsToLocalStorage()
+    ElMessage.success('会话已保存到服务器')
+  } catch (error) {
+    console.error('[Chat] 保存失败:', error)
+    ElMessage.error('保存失败：' + error.message)
+  }
 }
 
 // 更新上下文记忆（同步 chatMessages 到 chatContextMemory）
@@ -2565,7 +2600,7 @@ const saveSessionsToLocalStorage = () => {
   }
 }
 
-// 从 localStorage 加载会话列表
+// 从 localStorage 加载会话列表（合并服务端数据）
 const loadSessionsFromLocalStorage = () => {
   try {
     const saved = localStorage.getItem(CHAT_STORAGE_KEY)
@@ -2584,6 +2619,64 @@ const loadSessionsFromLocalStorage = () => {
   } catch (e) {
     console.warn('[Chat] 从 localStorage 加载会话失败:', e)
     createNewSession()
+  }
+}
+
+// 从服务器加载会话列表并与本地合并
+const loadChatSessionsFromServer = async () => {
+  try {
+    isSyncing.value = true
+    const serverSessions = await getChatSessions(deviceId.value)
+
+    if (serverSessions.length === 0) {
+      isSyncing.value = false
+      return
+    }
+
+    // 合并服务端会话到本地
+    const localSessionIds = new Set(chatSessions.value.map(s => s.id))
+
+    for (const serverSession of serverSessions) {
+      const existingIndex = chatSessions.value.findIndex(s => s.id === serverSession.id)
+
+      if (existingIndex >= 0) {
+        // 本地已有，比较更新时间，以新的为准
+        const localSession = chatSessions.value[existingIndex]
+        const localTime = new Date(localSession.updatedAt || 0)
+        const serverTime = new Date(serverSession.updatedAt)
+
+        if (serverTime > localTime) {
+          // 服务端更新，覆盖本地
+          chatSessions.value[existingIndex] = {
+            ...serverSession,
+            synced: true
+          }
+          if (currentSessionId.value === serverSession.id) {
+            chatMessages.value = serverSession.messages || []
+            chatContextMemory.value[currentSessionId.value] = chatMessages.value
+          }
+        }
+      } else {
+        // 本地没有，添加服务端会话
+        chatSessions.value.push({
+          ...serverSession,
+          synced: true
+        })
+      }
+    }
+
+    // 按更新时间排序
+    chatSessions.value.sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt))
+
+    saveSessionsToLocalStorage()
+
+    if (serverSessions.length > 0) {
+      console.log(`[Chat] 从服务器加载 ${serverSessions.length} 个会话`)
+    }
+  } catch (error) {
+    console.warn('[Chat] 从服务器加载会话失败:', error)
+  } finally {
+    isSyncing.value = false
   }
 }
 
@@ -2617,10 +2710,18 @@ defineExpose({
 })
 
 // 初始化 AI Chat 会话（在组件挂载时）
-onMounted(() => {
+onMounted(async () => {
+  // 生成设备 ID
+  deviceId.value = generateDeviceId()
+
+  // 先从 localStorage 加载
   loadSessionsFromLocalStorage()
+
   // 初始化上下文记忆
   updateContextMemory()
+
+  // 从服务器同步会话（异步）
+  await loadChatSessionsFromServer()
 })
 </script>
 
@@ -3246,14 +3347,30 @@ onMounted(() => {
   border-color: #409eff;
 }
 
+.session-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
 .session-title {
   font-size: 13px;
   font-weight: 500;
   color: #303133;
-  margin-bottom: 6px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  flex: 1;
+}
+
+.sync-badge {
+  font-size: 10px;
+  padding: 0 4px;
+  height: 16px;
+  line-height: 14px;
+  flex-shrink: 0;
 }
 
 .session-meta {

@@ -160,7 +160,7 @@ ssh root@192.168.200.77 "ls -la /opt/satellite-annotation/data/road_networks/"
 
 ## 版本信息
 
-- 前端版本：v3.3.0 (20260425-AI 聊天会话管理 + 多轮对话)
+- 前端版本：v3.4.0 (20260425-AI 聊天会话云端同步)
 - 后端版本：Spring Boot 3.2.0
 - 数据库：PostgreSQL
 - 地图服务器：OSRM (端口 5000)
