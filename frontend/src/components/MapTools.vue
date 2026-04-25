@@ -2365,22 +2365,22 @@ const handleChatSend = async () => {
     })
     scrollToBottom()
 
-    // 构建 Ollama 对话消息格式
+    // 构建 Ollama 对话消息格式（过滤掉空内容和 UI 状态文本）
     const ollamaMessages = buildOllamaMessages(userMessage)
-    console.log('[Chat] Ollama 对话消息数量:', ollamaMessages.length)
+    console.log('[Chat] ===== 开始工具调用 =====')
+    console.log('[Chat] Ollama 对话消息数量:', ollamaMessages.length, JSON.stringify(ollamaMessages, null, 2))
 
     // 调用 Ollama chat API（带工具调用支持）
-    await chatWithTools(
+    const finalContent = await chatWithTools(
       ollamaMessages,
       'gemma4:26b',
       (chunk, done) => {
-        console.log('[Chat] chunk:', chunk, 'done:', done)
         if (chunk) {
           chatMessages.value[aiMessageIndex].content += chunk
         }
         if (done) {
           chatLoading.value = false
-          console.log('[Chat] 响应完成，chatLoading=false')
+          console.log('[Chat] ===== 响应完成 =====')
           updateContextMemory()
           saveSessionsToLocalStorage()
           scrollToBottom()
@@ -2388,10 +2388,10 @@ const handleChatSend = async () => {
       },
       (toolName) => {
         console.log('[Chat] 工具调用中:', toolName)
-        chatMessages.value[aiMessageIndex].content += `\n🔍 正在查询 ${toolName}...\n`
-        scrollToBottom()
       }
     )
+
+    console.log('[Chat] 最终回答:', finalContent)
 
     // 如果 chatWithTools 返回但 done 从未被调用（非流式情况）
     if (chatLoading.value) {
@@ -2402,6 +2402,7 @@ const handleChatSend = async () => {
     }
   } catch (error) {
     chatLoading.value = false
+    console.error('[Chat] 错误:', error)
     ElMessage.error('AI 响应失败：' + error.message)
     // 添加错误消息
     chatMessages.value.push({
@@ -2690,8 +2691,13 @@ const buildOllamaMessages = (userMessage) => {
 
   const messages = []
 
-  // 添加历史消息（role: 'ai' → 'assistant'）
+  // 添加历史消息（role: 'ai' → 'assistant'），过滤掉 UI 状态文本
   for (const msg of recentMessages) {
+    // 跳过空消息
+    if (!msg.content || !msg.content.trim()) continue
+    // 过滤掉工具查询状态文本
+    if (msg.content.includes('正在查询') || msg.content.includes('🔍')) continue
+
     messages.push({
       role: msg.role === 'ai' ? 'assistant' : msg.role,
       content: msg.content

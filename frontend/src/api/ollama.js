@@ -2,12 +2,27 @@ const OLLAMA_BASE_URL = '/ollama'
 const MCP_BASE_URL = '/api/mcp'
 
 /**
+ * 带超时的 fetch
+ */
+async function fetchWithTimeout(url, options = {}, timeoutMs = 120000) {
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), timeoutMs)
+  try {
+    const response = await fetch(url, { ...options, signal: controller.signal })
+    return response
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
+/**
  * 从 MCP 服务器获取工具定义
  * @returns {Promise<Array>} Ollama 格式的工具列表
  */
 async function fetchMCPTools() {
   try {
-    const response = await fetch(`${MCP_BASE_URL}/message`, {
+    console.log('[Ollama] 正在获取 MCP 工具列表...')
+    const response = await fetchWithTimeout(`${MCP_BASE_URL}/message`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -16,16 +31,15 @@ async function fetchMCPTools() {
         method: 'tools/list',
         params: {}
       })
-    })
+    }, 10000)
     if (!response.ok) {
-      console.warn('[Ollama] 获取 MCP 工具列表失败:', response.status)
+      console.error('[Ollama] MCP 工具列表请求失败:', response.status, response.statusText)
       return []
     }
     const data = await response.json()
     const mcpTools = data.result?.tools || []
 
-    // 转换为 Ollama 工具格式
-    return mcpTools.map(tool => ({
+    const tools = mcpTools.map(tool => ({
       type: 'function',
       function: {
         name: tool.name,
@@ -33,8 +47,10 @@ async function fetchMCPTools() {
         parameters: tool.inputSchema || { type: 'object', properties: {} }
       }
     }))
+    console.log('[Ollama] 获取到 MCP 工具:', tools.map(t => t.function.name))
+    return tools
   } catch (error) {
-    console.warn('[Ollama] 获取 MCP 工具列表失败:', error.message)
+    console.error('[Ollama] 获取 MCP 工具列表失败:', error.message, error)
     return []
   }
 }
@@ -46,7 +62,8 @@ async function fetchMCPTools() {
  * @returns {Promise<string>} 工具执行结果（文本）
  */
 async function callMCPTool(toolName, args) {
-  const response = await fetch(`${MCP_BASE_URL}/message`, {
+  console.log('[Ollama] 调用 MCP 工具:', toolName, args)
+  const response = await fetchWithTimeout(`${MCP_BASE_URL}/message`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -55,11 +72,12 @@ async function callMCPTool(toolName, args) {
       method: 'tools/call',
       params: { name: toolName, arguments: args || {} }
     })
-  })
+  }, 15000)
   if (!response.ok) {
-    throw new Error(`MCP 工具调用失败: ${response.status}`)
+    throw new Error(`MCP 工具调用失败: HTTP ${response.status}`)
   }
   const data = await response.json()
+  console.log('[Ollama] MCP 工具结果:', JSON.stringify(data.result, null, 2))
   const content = data.result?.content
   if (content) {
     return typeof content === 'string' ? content : JSON.stringify(content, null, 2)
@@ -69,84 +87,121 @@ async function callMCPTool(toolName, args) {
 
 /**
  * 调用 Ollama chat API（支持工具调用）
- * @param {Array} messages - 对话消息列表 [{role, content}]
- * @param {Array} tools - Ollama 格式的工具列表
- * @param {string} model - 模型名称
- * @param {function} onChunk - 流式响应回调函数（仅最终文本响应时触发）
- * @returns {Promise<string>} - 完整响应文本
  */
-async function chatWithOllama(messages, tools, model = 'gemma4:26b', onChunk = null) {
-  const response = await fetch(`${OLLAMA_BASE_URL}/chat`, {
+async function chatWithOllama(messages, tools, model = 'gemma4:26b') {
+  console.log('[Ollama] 发送 chat 请求:', {
+    model,
+    messageCount: messages.length,
+    toolCount: tools?.length || 0,
+    messages: JSON.stringify(messages, null, 2)
+  })
+
+  const requestBody = {
+    model,
+    messages,
+    stream: false
+  }
+  if (tools && tools.length > 0) {
+    requestBody.tools = tools
+  }
+
+  const response = await fetchWithTimeout(`${OLLAMA_BASE_URL}/chat`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      model,
-      messages,
-      tools,
-      stream: false
-    })
-  })
+    body: JSON.stringify(requestBody)
+  }, 120000)
+
   if (!response.ok) {
-    throw new Error(`Ollama chat 请求失败: HTTP ${response.status}`)
+    const text = await response.text().catch(() => '')
+    throw new Error(`Ollama chat 请求失败: HTTP ${response.status} ${text.substring(0, 200)}`)
   }
   const data = await response.json()
   const message = data.message || {}
   const content = message.content || ''
   const toolCalls = message.tool_calls || []
 
+  console.log('[Ollama] 收到响应:', {
+    content: content ? content.substring(0, 200) : '(empty)',
+    toolCallCount: toolCalls.length,
+    toolCalls: JSON.stringify(toolCalls, null, 2)
+  })
+
   return { content, toolCalls }
 }
 
 /**
  * 带工具调用的聊天主函数
+ *
  * 流程：获取工具 → 发送到 Ollama → 如有工具调用则执行 → 把结果喂回 Ollama → 返回最终回答
  *
  * @param {Array} messages - 对话消息列表 [{role, content}]
  * @param {string} model - 模型名称（默认 gemma4:26b）
- * @param {function} onChunk - 流式响应回调函数
+ * @param {function} onChunk - 最终文本的流式显示回调
  * @param {function} onToolCall - 工具调用进度回调 (toolName) => void
  * @returns {Promise<string>} - 完整响应文本
  */
 export async function chatWithTools(messages, model = 'gemma4:26b', onChunk = null, onToolCall = null) {
+  console.log('[Chat] ===== 开始工具调用流程 =====')
+  console.log('[Chat] 输入消息:', JSON.stringify(messages, null, 2))
+
   // 1. 获取 MCP 工具定义
   const tools = await fetchMCPTools()
   console.log('[Chat] MCP 工具数量:', tools.length)
 
+  if (tools.length === 0) {
+    console.warn('[Chat] 没有可用的 MCP 工具，降级为普通对话')
+    return ''
+  }
+
   // 2. 发送到 Ollama 进行对话
-  let response = await chatWithOllama(messages, tools, model, onChunk)
-  console.log('[Chat] Ollama 响应:', response)
+  console.log('[Chat] 发送消息到 Ollama，等待模型响应（可能需要较长时间）...')
+  let response = await chatWithOllama(messages, tools, model)
+  console.log('[Chat] Ollama 返回:', { content: response.content, toolCalls: response.toolCalls.length })
 
   // 3. 如果 Ollama 要求调用工具
   if (response.toolCalls && response.toolCalls.length > 0) {
+    console.log('[Chat] 检测到', response.toolCalls.length, '个工具调用')
+
     // 逐个调用工具
     for (const toolCall of response.toolCalls) {
       const fn = toolCall.function
       const toolName = fn?.name
       const args = typeof fn?.arguments === 'string'
         ? JSON.parse(fn.arguments)
-        : fn?.arguments || {}
+        : (fn?.arguments || {})
 
-      console.log('[Chat] 调用工具:', toolName, args)
+      console.log('[Chat] >>> 执行工具调用:', toolName, JSON.stringify(args))
       if (onToolCall) onToolCall(toolName)
 
       const toolResult = await callMCPTool(toolName, args)
-      console.log('[Chat] 工具结果:', toolResult.substring(0, 200))
+      console.log('[Chat] <<< 工具结果 (前300字符):', toolResult.substring(0, 300))
 
-      // 把工具结果添加到消息列表
-      messages.push({ role: 'assistant', content: response.content })
+      // 添加 assistant 消息（包含 tool_calls）
+      messages.push({
+        role: 'assistant',
+        content: response.content,
+        tool_calls: response.toolCalls
+      })
+      // 添加 tool 结果消息
       messages.push({
         role: 'tool',
         content: toolResult
       })
 
-      // 再次发送到 Ollama 获取最终回答
-      response = await chatWithOllama(messages, [], model, onChunk)
+      console.log('[Chat] 将工具结果发送回 Ollama...')
+      // 再次发送到 Ollama 获取最终回答（不带 tools）
+      response = await chatWithOllama(messages, [], model)
+      console.log('[Chat] Ollama 最终回答:', response.content?.substring(0, 200) || '(empty)')
     }
+  } else {
+    console.log('[Chat] Ollama 未触发工具调用，直接返回文本')
   }
 
-  // 4. 返回最终文本（支持流式）
+  // 4. 返回最终文本
   const finalContent = response.content || ''
-  if (onChunk) {
+  console.log('[Chat] ===== 工具调用流程结束，最终回答长度:', finalContent.length, '=====')
+
+  if (onChunk && finalContent) {
     // 流式效果：逐字发送
     const chunkSize = 10
     for (let i = 0; i < finalContent.length; i += chunkSize) {
