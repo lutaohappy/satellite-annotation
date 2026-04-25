@@ -41,7 +41,7 @@ public class McpController {
             // 处理请求
             McpMessage.Response response = mcpServerService.handleRequest(mcpRequest);
 
-            return ResponseEntity.ok(response);
+            return ResponseEntity.ok(objectMapper.convertValue(response, Map.class));
 
         } catch (Exception e) {
             log.error("Error processing MCP message: {}", e.getMessage(), e);
@@ -53,7 +53,7 @@ public class McpController {
             );
             McpMessage.Response response = new McpMessage.Response("2.0", null, null, error);
 
-            return ResponseEntity.status(500).body(response);
+            return ResponseEntity.status(500).body(objectMapper.convertValue(response, Map.class));
         }
     }
 

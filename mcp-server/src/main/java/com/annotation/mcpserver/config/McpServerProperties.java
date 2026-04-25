@@ -2,16 +2,16 @@ package com.annotation.mcpserver.config;
 
 import lombok.Data;
 import org.springframework.boot.context.properties.ConfigurationProperties;
-import org.springframework.stereotype.Configuration;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 /**
  * MCP 服务器配置
  */
 @Data
-@Configuration
 @ConfigurationProperties(prefix = "mcp.server")
 public class McpServerProperties {
 
