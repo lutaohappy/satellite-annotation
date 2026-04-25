@@ -389,28 +389,41 @@
                   </div>
                 </div>
               </div>
-              <!-- 工具选择 -->
-              <div class="tool-selector">
-                <el-select
-                  v-model="selectedTool"
-                  placeholder="🔧 选择工具"
-                  clearable
-                  @change="handleToolChange"
-                  size="small"
-                  style="width: 100%"
-                >
-                  <el-option
+              <!-- 工具注册信息 -->
+              <div class="tool-registry" v-if="mcpTools.length > 0">
+                <div class="tool-registry-header" @click="showToolRegistry = !showToolRegistry">
+                  <span class="tool-registry-title">
+                    🔧 已注册工具 ({{ mcpTools.length }})
+                  </span>
+                  <el-icon class="tool-registry-arrow" :class="{ expanded: showToolRegistry }">
+                    <ArrowDown />
+                  </el-icon>
+                </div>
+                <div class="tool-registry-list" v-show="showToolRegistry">
+                  <div
                     v-for="tool in mcpTools"
                     :key="tool.name"
-                    :label="tool.displayName"
-                    :value="tool.name"
+                    class="tool-card"
                   >
-                    <div class="tool-option">
-                      <span class="tool-name">{{ tool.displayName }}</span>
-                      <span class="tool-desc">{{ tool.description }}</span>
+                    <div class="tool-card-header">
+                      <span class="tool-card-name">{{ tool.name }}</span>
+                      <el-tag v-if="tool.paramCount > 0" size="small" type="info">
+                        {{ tool.paramCount }} 个参数
+                      </el-tag>
+                      <el-tag v-else size="small" type="success">无需参数</el-tag>
                     </div>
-                  </el-option>
-                </el-select>
+                    <div class="tool-card-desc">{{ tool.description }}</div>
+                    <div class="tool-params" v-if="tool.params && tool.params.length > 0">
+                      <div class="tool-params-title">参数：</div>
+                      <div class="tool-param" v-for="p in tool.params" :key="p.name">
+                        <span class="param-name">{{ p.name }}</span>
+                        <span class="param-type">{{ p.type }}</span>
+                        <span class="param-required" v-if="p.required" style="color: #f56c6c;">必填</span>
+                        <span class="param-desc">{{ p.description }}</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
               </div>
               <!-- 输入区域 -->
               <div class="chat-input-area">
@@ -791,7 +804,7 @@
 <script setup>
 import { ref, computed, watch, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Upload, Close, Lock, Unlock, Refresh, Picture, Edit, Delete, Plus, Location, CirclePlus, Folder, User, Cpu, Document } from '@element-plus/icons-vue'
+import { Upload, Close, Lock, Unlock, Refresh, Picture, Edit, Delete, Plus, Location, CirclePlus, Folder, User, Cpu, Document, ArrowDown } from '@element-plus/icons-vue'
 import { getLength, getArea } from 'ol/sphere'
 import { transform, fromLonLat } from 'ol/proj'
 import { useImageStore } from '@/stores/image'
@@ -887,7 +900,7 @@ const chatContextMemory = ref({}) // 存储每个会话的上下文
 const deviceId = ref('')  // 设备 ID
 const isSyncing = ref(false)  // 同步中状态
 const mcpTools = ref([])  // MCP 工具列表
-const selectedTool = ref('')  // 当前选中的工具
+const showToolRegistry = ref(false)  // 工具注册信息展开/折叠
 
 // 本地存储键名
 const CHAT_STORAGE_KEY = 'ai_chat_sessions'
@@ -2362,30 +2375,12 @@ import { fetchMCPToolsList } from '@/api/ollama'
 // 加载 MCP 工具列表
 const loadMCPTools = async () => {
   try {
-    mcpTools.value = await fetchMCPToolsList()
+    const tools = await fetchMCPToolsList()
+    mcpTools.value = tools
     console.log('[Chat] 加载了', mcpTools.value.length, '个 MCP 工具')
   } catch (error) {
     console.error('[Chat] 加载 MCP 工具失败:', error)
   }
-}
-
-// 选择工具时自动填充提示语
-const handleToolChange = (toolName) => {
-  if (!toolName) return
-
-  const tool = mcpTools.value.find(t => t.name === toolName)
-  if (!tool) return
-
-  // 根据工具生成合适的提示语
-  const prompts = {
-    'list_road_networks': '帮我查一下库里面有多少条路网数据？',
-    'list_chat_sessions': '帮我查一下当前有多少个对话？',
-    'echo': '用回声工具测试一下连接',
-    'get_current_time': '现在几点了？'
-  }
-
-  chatInput.value = prompts[toolName] || `调用${tool.displayName}`
-  console.log('[Chat] 选中工具:', tool.displayName, '提示语:', chatInput.value)
 }
 
 // AI Chat 相关方法
@@ -3618,6 +3613,109 @@ onMounted(async () => {
   font-size: 12px;
   color: #909399;
   margin-top: 2px;
+}
+
+.tool-registry {
+  padding: 0 10px;
+  background: white;
+}
+
+.tool-registry-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  background: #f5f7fa;
+  border-radius: 6px;
+  cursor: pointer;
+  user-select: none;
+  transition: background 0.2s;
+}
+
+.tool-registry-header:hover {
+  background: #eef0f4;
+}
+
+.tool-registry-title {
+  font-size: 13px;
+  font-weight: 500;
+  color: #606266;
+}
+
+.tool-registry-arrow {
+  font-size: 14px;
+  color: #909399;
+  transition: transform 0.3s;
+}
+
+.tool-registry-arrow.expanded {
+  transform: rotate(180deg);
+}
+
+.tool-registry-list {
+  padding: 8px 0;
+}
+
+.tool-card {
+  padding: 10px 12px;
+  margin-bottom: 6px;
+  background: #fafafa;
+  border-radius: 6px;
+  border-left: 3px solid #409eff;
+}
+
+.tool-card:last-child {
+  margin-bottom: 0;
+}
+
+.tool-card-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.tool-card-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: #303133;
+  font-family: 'Courier New', monospace;
+}
+
+.tool-card-desc {
+  font-size: 12px;
+  color: #606266;
+  margin-bottom: 6px;
+}
+
+.tool-params-title {
+  font-size: 12px;
+  font-weight: 500;
+  color: #909399;
+  margin-bottom: 4px;
+}
+
+.tool-param {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 0;
+  font-size: 12px;
+}
+
+.param-name {
+  font-family: 'Courier New', monospace;
+  color: #e6a23c;
+  font-weight: 500;
+}
+
+.param-type {
+  color: #909399;
+  font-style: italic;
+}
+
+.param-desc {
+  color: #606266;
 }
 
 .chat-input {

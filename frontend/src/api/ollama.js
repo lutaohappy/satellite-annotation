@@ -35,11 +35,23 @@ export async function fetchMCPToolsList() {
     const data = await response.json()
     const mcpTools = data.result?.tools || []
 
-    return mcpTools.map(tool => ({
-      name: tool.name,
-      displayName: tool.name.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()),
-      description: tool.description
-    }))
+    return mcpTools.map(tool => {
+      const schema = tool.inputSchema || {}
+      const props = schema.properties || {}
+      const required = schema.required || []
+      const params = Object.entries(props).map(([name, schema]) => ({
+        name,
+        type: schema.type || 'string',
+        description: schema.description || '',
+        required: required.includes(name)
+      }))
+      return {
+        name: tool.name,
+        description: tool.description,
+        params,
+        paramCount: params.length
+      }
+    })
   } catch (error) {
     console.warn('[Ollama] UI 获取工具列表失败:', error.message)
     return []
