@@ -2306,25 +2306,38 @@ const handleChatSend = async () => {
   try {
     chatLoading.value = true
 
+    // 先添加一个空的 AI 消息占位
+    const aiMessageIndex = chatMessages.value.length
+    chatMessages.value.push({
+      role: 'ai',
+      content: '',
+      time: new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
+    })
+    scrollToBottom()
+
     // 调用 Ollama API
-    let aiResponse = ''
     await generateResponse(
       userMessage,
-      'qwen2.5',
+      'gemma4:26b',
       (chunk, done) => {
-        aiResponse += chunk
+        console.log('[Chat] chunk:', chunk, 'done:', done)
+        if (chunk) {
+          // 流式过程中逐步更新内容
+          chatMessages.value[aiMessageIndex].content += chunk
+        }
         if (done) {
           chatLoading.value = false
-          // 添加 AI 消息
-          chatMessages.value.push({
-            role: 'ai',
-            content: aiResponse,
-            time: new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
-          })
+          console.log('[Chat] 响应完成，chatLoading=false')
           scrollToBottom()
         }
       }
     )
+
+    // 如果 generateResponse 返回但 done 从未被调用（非流式情况）
+    if (chatLoading.value) {
+      chatLoading.value = false
+      console.log('[Chat] 响应结束但 done 未触发，手动设置 chatLoading=false')
+    }
   } catch (error) {
     chatLoading.value = false
     ElMessage.error('AI 响应失败：' + error.message)

@@ -45,9 +45,12 @@ export async function generateResponse(prompt, model = 'gemma4:26b', onChunk = n
           if (!line.trim()) continue
           try {
             const json = JSON.parse(line)
-            if (json.response) {
-              fullResponse += json.response
-              onChunk(json.response, json.done)
+            // 只要有 response 或 done 标志就调用回调
+            if (json.response || json.done) {
+              if (json.response) {
+                fullResponse += json.response
+              }
+              onChunk(json.response || '', json.done)
             }
           } catch (e) {
             console.warn('[Ollama] 解析响应失败:', line)
@@ -59,9 +62,12 @@ export async function generateResponse(prompt, model = 'gemma4:26b', onChunk = n
       if (buffer.trim()) {
         try {
           const json = JSON.parse(buffer)
-          if (json.response) {
-            fullResponse += json.response
-            onChunk(json.response, json.done)
+          // 只要有 response 或 done 标志就调用回调
+          if (json.response || json.done) {
+            if (json.response) {
+              fullResponse += json.response
+            }
+            onChunk(json.response || '', json.done)
           }
         } catch (e) {
           console.warn('[Ollama] 解析最终 buffer 失败:', buffer)
