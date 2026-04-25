@@ -2330,7 +2330,7 @@ const deleteSaved = async (id) => {
 }
 
 // AI Chat 相关方法
-import { generateResponse } from '@/api/ollama'
+import { chatWithTools } from '@/api/ollama'
 
 const handleChatSend = async () => {
   if (!chatInput.value.trim() || chatLoading.value) return
@@ -2365,33 +2365,35 @@ const handleChatSend = async () => {
     })
     scrollToBottom()
 
-    // 构建带上下文的提示词（多轮对话支持）
-    const contextPrompt = buildContextPrompt(userMessage)
-    console.log('[Chat] 上下文提示词:', contextPrompt.substring(0, 200) + '...')
+    // 构建 Ollama 对话消息格式
+    const ollamaMessages = buildOllamaMessages(userMessage)
+    console.log('[Chat] Ollama 对话消息数量:', ollamaMessages.length)
 
-    // 调用 Ollama API
-    await generateResponse(
-      contextPrompt,
+    // 调用 Ollama chat API（带工具调用支持）
+    await chatWithTools(
+      ollamaMessages,
       'gemma4:26b',
       (chunk, done) => {
         console.log('[Chat] chunk:', chunk, 'done:', done)
         if (chunk) {
-          // 流式过程中逐步更新内容
           chatMessages.value[aiMessageIndex].content += chunk
         }
         if (done) {
           chatLoading.value = false
           console.log('[Chat] 响应完成，chatLoading=false')
-          // 更新上下文记忆（在 AI 消息添加后）
           updateContextMemory()
-          // 保存会话到 localStorage
           saveSessionsToLocalStorage()
           scrollToBottom()
         }
+      },
+      (toolName) => {
+        console.log('[Chat] 工具调用中:', toolName)
+        chatMessages.value[aiMessageIndex].content += `\n🔍 正在查询 ${toolName}...\n`
+        scrollToBottom()
       }
     )
 
-    // 如果 generateResponse 返回但 done 从未被调用（非流式情况）
+    // 如果 chatWithTools 返回但 done 从未被调用（非流式情况）
     if (chatLoading.value) {
       chatLoading.value = false
       console.log('[Chat] 响应结束但 done 未触发，手动设置 chatLoading=false')
@@ -2678,6 +2680,28 @@ const loadChatSessionsFromServer = async () => {
   } finally {
     isSyncing.value = false
   }
+}
+
+// 构建 Ollama chat 消息格式（支持工具调用）
+const buildOllamaMessages = (userMessage) => {
+  const MAX_CONTEXT_MESSAGES = 10
+  const context = chatContextMemory.value[currentSessionId.value] || []
+  const recentMessages = context.slice(-MAX_CONTEXT_MESSAGES)
+
+  const messages = []
+
+  // 添加历史消息（role: 'ai' → 'assistant'）
+  for (const msg of recentMessages) {
+    messages.push({
+      role: msg.role === 'ai' ? 'assistant' : msg.role,
+      content: msg.content
+    })
+  }
+
+  // 添加新消息
+  messages.push({ role: 'user', content: userMessage })
+
+  return messages
 }
 
 // 构建带上下文的提示词（多轮对话支持）
