@@ -2340,7 +2340,7 @@ const handleChatSend = async () => {
   }
   chatMessages.value.push(userMsg)
 
-  // 更新当前会话
+  // 更新当前会话标题（如果是第一条消息）
   updateCurrentSession(userMessage)
 
   // 滚动到底部
@@ -2360,6 +2360,7 @@ const handleChatSend = async () => {
 
     // 构建带上下文的提示词（多轮对话支持）
     const contextPrompt = buildContextPrompt(userMessage)
+    console.log('[Chat] 上下文提示词:', contextPrompt.substring(0, 200) + '...')
 
     // 调用 Ollama API
     await generateResponse(
@@ -2374,8 +2375,10 @@ const handleChatSend = async () => {
         if (done) {
           chatLoading.value = false
           console.log('[Chat] 响应完成，chatLoading=false')
-          // 保存 AI 响应到上下文
-          saveSessionToMemory()
+          // 更新上下文记忆（在 AI 消息添加后）
+          updateContextMemory()
+          // 保存会话到 localStorage
+          saveSessionsToLocalStorage()
           scrollToBottom()
         }
       }
@@ -2385,7 +2388,8 @@ const handleChatSend = async () => {
     if (chatLoading.value) {
       chatLoading.value = false
       console.log('[Chat] 响应结束但 done 未触发，手动设置 chatLoading=false')
-      saveSessionToMemory()
+      updateContextMemory()
+      saveSessionsToLocalStorage()
     }
   } catch (error) {
     chatLoading.value = false
@@ -2480,6 +2484,9 @@ const switchSession = (sessionId) => {
   chatMessages.value = session.messages || []
   chatContextMemory.value[sessionId] = session.messages || []
 
+  // 更新上下文记忆
+  updateContextMemory()
+
   setTimeout(() => {
     scrollToBottom()
   }, 50)
@@ -2514,6 +2521,11 @@ const saveCurrentSession = () => {
   saveCurrentSessionToMemory()
   saveSessionsToLocalStorage()
   ElMessage.success('会话已保存')
+}
+
+// 更新上下文记忆（同步 chatMessages 到 chatContextMemory）
+const updateContextMemory = () => {
+  chatContextMemory.value[currentSessionId.value] = [...chatMessages.value]
 }
 
 // 更新当前会话的标题和时间
@@ -2607,6 +2619,8 @@ defineExpose({
 // 初始化 AI Chat 会话（在组件挂载时）
 onMounted(() => {
   loadSessionsFromLocalStorage()
+  // 初始化上下文记忆
+  updateContextMemory()
 })
 </script>
 
