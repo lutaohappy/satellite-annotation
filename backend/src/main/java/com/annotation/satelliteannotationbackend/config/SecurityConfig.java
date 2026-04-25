@@ -51,6 +51,7 @@ public class SecurityConfig {
                         .requestMatchers(
                                 "/api/auth/**",
                                 "/api/public/**",
+                                "/api/chat-sessions/**",
                                 "/api/images/**",
                                 "/api/admin/**",
                                 "/error",
