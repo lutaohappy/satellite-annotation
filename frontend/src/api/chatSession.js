@@ -54,23 +54,13 @@ export async function deleteChatSession(sessionId, deviceId) {
 }
 
 /**
- * 生成设备 ID（使用简单的浏览器指纹）
+ * 生成设备 ID
+ * 使用固定的共享 ID，让所有用户/设备共享同一份会话数据
+ *
+ * 注意：这意味着所有访问者看到的是同一份会话列表
+ * 如果需要按用户隔离，需要添加用户登录系统
  */
 export function generateDeviceId() {
-  const navigatorData = [
-    navigator.userAgent,
-    navigator.language,
-    screen.colorDepth,
-    screen.width + 'x' + screen.height,
-    new Date().getTimezoneOffset()
-  ].join('|')
-
-  // 简单哈希
-  let hash = 0
-  for (let i = 0; i < navigatorData.length; i++) {
-    const char = navigatorData.charCodeAt(i)
-    hash = ((hash << 5) - hash) + char
-    hash = hash & hash
-  }
-  return 'device_' + Math.abs(hash).toString(36)
+  // 使用固定的共享设备 ID
+  return 'shared_device'
 }
