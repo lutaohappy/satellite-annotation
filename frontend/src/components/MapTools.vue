@@ -322,90 +322,98 @@
       <!-- AI Chat Tab -->
       <el-tab-pane label="AI 助手" name="ai-chat">
         <div class="tab-content ai-chat-content">
-          <div class="chat-container">
-            <!-- 会话管理栏 -->
-            <div class="chat-session-bar">
-              <div class="session-selector">
-                <el-select v-model="currentSessionId" placeholder="选择会话" size="small" @change="switchSession" style="width: 200px">
-                  <el-option
-                    v-for="session in chatSessions"
-                    :key="session.id"
-                    :label="session.title"
-                    :value="session.id"
-                  >
-                    <span>{{ session.title }}</span>
-                    <span class="session-time">{{ session.updatedAt }}</span>
-                  </el-option>
-                </el-select>
-              </div>
-              <div class="session-actions">
+          <div class="chat-layout">
+            <!-- 左侧会话列表 -->
+            <div class="chat-sidebar">
+              <div class="sidebar-header">
                 <el-button size="small" @click="createNewSession" title="新建会话">
-                  <el-icon><Plus /></el-icon>
+                  <el-icon><Plus /></el-icon> 新建
                 </el-button>
-                <el-button size="small" :disabled="chatSessions.length <= 1" @click="deleteCurrentSession" title="删除当前会话" type="danger">
-                  <el-icon><Delete /></el-icon>
+                <el-button size="small" @click="saveCurrentSession" title="保存会话">
+                  <el-icon><Document /></el-icon> 保存
+                </el-button>
+                <el-button size="small" :disabled="chatSessions.length <= 1" @click="deleteCurrentSession" title="删除会话" type="danger">
+                  <el-icon><Delete /></el-icon> 删除
                 </el-button>
               </div>
-            </div>
-            <!-- 聊天消息列表 -->
-            <div class="chat-messages" ref="chatMessagesRef">
-              <div
-                v-for="(msg, index) in chatMessages"
-                :key="index"
-                class="chat-message"
-                :class="msg.role"
-              >
-                <div class="message-avatar">
-                  <el-icon v-if="msg.role === 'user'"><User /></el-icon>
-                  <el-icon v-else><Cpu /></el-icon>
-                </div>
-                <div class="message-content">
-                  <div class="message-text">{{ msg.content }}</div>
-                  <div class="message-time">{{ msg.time }}</div>
-                </div>
-              </div>
-              <!-- 加载中显示 -->
-              <div v-if="chatLoading" class="chat-message ai">
-                <div class="message-avatar">
-                  <el-icon><Cpu /></el-icon>
-                </div>
-                <div class="message-content">
-                  <div class="message-text typing">
-                    <span class="typing-dot"></span>
-                    <span class="typing-dot"></span>
-                    <span class="typing-dot"></span>
+              <div class="session-list" ref="sessionListRef">
+                <div
+                  v-for="session in chatSessions"
+                  :key="session.id"
+                  class="session-item"
+                  :class="{ active: session.id === currentSessionId }"
+                  @click="switchSession(session.id)"
+                >
+                  <div class="session-title">{{ session.title }}</div>
+                  <div class="session-meta">
+                    <span class="session-count">{{ session.messages?.length || 0 }} 条消息</span>
+                    <span class="session-date">{{ formatDate(session.updatedAt) }}</span>
                   </div>
                 </div>
               </div>
             </div>
-            <!-- 输入区域 -->
-            <div class="chat-input-area">
-              <el-input
-                v-model="chatInput"
-                type="textarea"
-                :rows="3"
-                placeholder="输入问题，按 Enter 发送（Shift+Enter 换行）..."
-                @keydown.enter.exact="handleChatSend"
-                :disabled="chatLoading"
-                class="chat-input"
-              />
-              <div class="chat-input-actions">
-                <el-button
-                  type="primary"
-                  size="small"
-                  @click="handleChatSend"
-                  :disabled="!chatInput.trim() || chatLoading"
-                  :loading="chatLoading"
+            <!-- 右侧聊天区域 -->
+            <div class="chat-main">
+              <!-- 聊天消息列表 -->
+              <div class="chat-messages" ref="chatMessagesRef">
+                <div
+                  v-for="(msg, index) in chatMessages"
+                  :key="index"
+                  class="chat-message"
+                  :class="msg.role"
                 >
-                  发送
-                </el-button>
-                <el-button
-                  size="small"
-                  @click="clearChatHistory"
-                  :disabled="chatMessages.length === 0"
-                >
-                  清空
-                </el-button>
+                  <div class="message-avatar">
+                    <el-icon v-if="msg.role === 'user'"><User /></el-icon>
+                    <el-icon v-else><Cpu /></el-icon>
+                  </div>
+                  <div class="message-content">
+                    <div class="message-text">{{ msg.content }}</div>
+                    <div class="message-time">{{ msg.time }}</div>
+                  </div>
+                </div>
+                <!-- 加载中显示 -->
+                <div v-if="chatLoading" class="chat-message ai">
+                  <div class="message-avatar">
+                    <el-icon><Cpu /></el-icon>
+                  </div>
+                  <div class="message-content">
+                    <div class="message-text typing">
+                      <span class="typing-dot"></span>
+                      <span class="typing-dot"></span>
+                      <span class="typing-dot"></span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <!-- 输入区域 -->
+              <div class="chat-input-area">
+                <el-input
+                  v-model="chatInput"
+                  type="textarea"
+                  :rows="2"
+                  placeholder="输入问题，按 Enter 发送（Shift+Enter 换行）..."
+                  @keydown.enter.exact="handleChatSend"
+                  :disabled="chatLoading"
+                  class="chat-input"
+                />
+                <div class="chat-input-actions">
+                  <el-button
+                    type="primary"
+                    size="small"
+                    @click="handleChatSend"
+                    :disabled="!chatInput.trim() || chatLoading"
+                    :loading="chatLoading"
+                  >
+                    发送
+                  </el-button>
+                  <el-button
+                    size="small"
+                    @click="clearChatHistory"
+                    :disabled="chatMessages.length === 0"
+                  >
+                    清空
+                  </el-button>
+                </div>
               </div>
             </div>
           </div>
@@ -756,7 +764,7 @@
 <script setup>
 import { ref, computed, watch, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Upload, Close, Lock, Unlock, Refresh, Picture, Edit, Delete, Plus, Location, CirclePlus, Folder, User, Cpu } from '@element-plus/icons-vue'
+import { Upload, Close, Lock, Unlock, Refresh, Picture, Edit, Delete, Plus, Location, CirclePlus, Folder, User, Cpu, Document } from '@element-plus/icons-vue'
 import { getLength, getArea } from 'ol/sphere'
 import { transform, fromLonLat } from 'ol/proj'
 import { useImageStore } from '@/stores/image'
@@ -846,6 +854,7 @@ const chatMessages = ref([])
 const chatInput = ref('')
 const chatLoading = ref(false)
 const chatMessagesRef = ref(null)
+const sessionListRef = ref(null)
 const chatContextMemory = ref({}) // 存储每个会话的上下文
 
 // 本地存储键名
@@ -2418,23 +2427,30 @@ const generateSessionTitle = (firstMessage) => {
   return content.substr(0, 18) + '...'
 }
 
-// 格式化时间为 HH:MM
-const formatTime = (date) => {
-  const d = new Date(date)
-  return d.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
-}
-
 // 格式化日期为 MM/DD HH:MM
-const formatDateTime = (date) => {
-  const d = new Date(date)
+const formatDate = (dateStr) => {
+  if (!dateStr) return ''
+  const d = new Date(dateStr)
+  const now = new Date()
+  const isToday = d.toDateString() === now.toDateString()
+
   const month = d.getMonth() + 1
   const day = d.getDate()
-  const time = formatTime(date)
-  return `${month}/${day} ${time}`
+  const hours = d.getHours().toString().padStart(2, '0')
+  const minutes = d.getMinutes().toString().padStart(2, '0')
+
+  if (isToday) {
+    return `今天 ${hours}:${minutes}`
+  } else {
+    return `${month}/${day} ${hours}:${minutes}`
+  }
 }
 
 // 创建新会话
 const createNewSession = () => {
+  // 先保存当前会话
+  saveCurrentSessionToMemory()
+
   const newSession = {
     id: generateSessionId(),
     title: '新会话',
@@ -2451,19 +2467,22 @@ const createNewSession = () => {
 
 // 切换会话
 const switchSession = (sessionId) => {
-  const session = chatSessions.value.find(s => s.id === sessionId)
-  if (!session) return
+  if (sessionId === currentSessionId.value) return
 
   // 保存当前会话到内存
   saveCurrentSessionToMemory()
 
+  const session = chatSessions.value.find(s => s.id === sessionId)
+  if (!session) return
+
   // 加载目标会话
+  currentSessionId.value = sessionId
   chatMessages.value = session.messages || []
   chatContextMemory.value[sessionId] = session.messages || []
 
   setTimeout(() => {
     scrollToBottom()
-  }, 100)
+  }, 50)
 }
 
 // 删除当前会话
@@ -2483,25 +2502,31 @@ const deleteCurrentSession = () => {
     const newSession = chatSessions.value[0]
     currentSessionId.value = newSession.id
     chatMessages.value = newSession.messages || []
+    chatContextMemory.value[newSession.id] = newSession.messages || []
   }
 
-  delete chatContextMemory.value[currentSessionId.value]
   saveSessionsToLocalStorage()
   ElMessage.success('已删除会话')
 }
 
+// 保存当前会话
+const saveCurrentSession = () => {
+  saveCurrentSessionToMemory()
+  saveSessionsToLocalStorage()
+  ElMessage.success('会话已保存')
+}
+
 // 更新当前会话的标题和时间
-const updateCurrentSession = (firstMessage) => {
+const updateCurrentSession = (userMessage) => {
   const session = chatSessions.value.find(s => s.id === currentSessionId.value)
   if (!session) return
 
   // 如果是第一条消息，生成标题
-  if (chatMessages.value.length === 2) { // 2 是因为已经添加了 user + ai 占位
-    session.title = generateSessionTitle({ content: firstMessage })
+  if (!session.title || session.title === '新会话' || !session.messages || session.messages.length === 0) {
+    session.title = generateSessionTitle({ content: userMessage })
   }
 
   session.updatedAt = new Date().toISOString()
-  saveSessionsToLocalStorage()
 }
 
 // 保存当前会话到内存
@@ -3153,45 +3178,83 @@ onMounted(() => {
   flex-direction: column;
 }
 
-.chat-container {
+/* 左右布局 */
+.chat-layout {
   display: flex;
-  flex-direction: column;
   height: 100%;
 }
 
-/* 会话管理栏 */
-.chat-session-bar {
+/* 左侧会话列表 */
+.chat-sidebar {
+  width: 220px;
+  min-width: 220px;
+  background: #f5f7fa;
+  border-right: 1px solid #e4e7ed;
+  display: flex;
+  flex-direction: column;
+}
+
+.sidebar-header {
+  padding: 10px;
+  display: flex;
+  gap: 6px;
+  border-bottom: 1px solid #e4e7ed;
+  background: #fff;
+}
+
+.sidebar-header .el-button {
+  flex: 1;
+  padding: 6px 8px;
+  font-size: 12px;
+}
+
+.session-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px;
+}
+
+.session-item {
+  padding: 10px 12px;
+  margin-bottom: 6px;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.2s;
+  border: 2px solid transparent;
+}
+
+.session-item:hover {
+  background: #e4e7ed;
+}
+
+.session-item.active {
+  background: #ecf5ff;
+  border-color: #409eff;
+}
+
+.session-title {
+  font-size: 13px;
+  font-weight: 500;
+  color: #303133;
+  margin-bottom: 6px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.session-meta {
   display: flex;
   justify-content: space-between;
-  align-items: center;
-  padding: 8px 10px;
-  background: #f5f7fa;
-  border-bottom: 1px solid #e4e7ed;
-}
-
-.session-selector {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.session-selector .el-select .el-input__inner {
-  font-size: 13px;
-}
-
-.session-time {
-  margin-left: 8px;
   font-size: 11px;
   color: #909399;
 }
 
-.session-actions {
+/* 右侧聊天区域 */
+.chat-main {
+  flex: 1;
   display: flex;
-  gap: 4px;
-}
-
-.session-actions .el-button {
-  padding: 6px 10px;
+  flex-direction: column;
+  min-width: 0;
 }
 
 .chat-messages {
